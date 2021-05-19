@@ -7,7 +7,7 @@ import ConfigSpace as CS
 
 from src.probability import pMOM_loglike, diag_w_Gauss_loglike, depth_categorical_VI
 from src.utils import Datafeed
-from src.datasets import load_flight, gen_spirals, load_gap_UCI
+from src.datasets import load_flight, load_gap_UCI #gen_spirals, 
 from src.DUN.training_wrappers import DUN_VI
 from src.DUN.stochastic_fc_models import arq_uncert_fc_resnet, arq_uncert_fc_MLP
 
