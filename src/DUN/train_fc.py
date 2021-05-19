@@ -59,7 +59,7 @@ def train_fc_DUN(net, name, save_dir, batch_size, nb_epochs, train_loader, val_l
         net.set_mode_train(True)
         tic = time.time()
         nb_samples = 0
-        for x, y in train_loader:
+        for x, y, *_ in train_loader:
             if flat_ims:
                 x = x.view(x.shape[0], -1)
 

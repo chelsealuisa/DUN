@@ -48,7 +48,7 @@ def train_fc_baseline(net, name, save_dir, batch_size, nb_epochs, trainloader, v
         net.set_mode_train(True)
         tic = time.time()
         nb_samples = 0
-        for x, y in trainloader:
+        for x, y, *_ in trainloader:
             if flat_ims:
                 x = x.view(x.shape[0], -1)
 
