@@ -92,7 +92,9 @@ def load_agw_1d(base_dir, get_feats=False):
 
 def load_andrew_1d(base_dir):
     if not path.exists(base_dir + '/andrew_1d'):
-        print('base_dir does not point to data directory')
+        mkdir(base_dir + '/andrew_1d')
+        urllib.urlretrieve('https://javierantoran.github.io/assets/datasets/1d_cosine_separated.pkl',
+                           filename=base_dir + '/andrew_1d/1d_cosine_separated.pkl')
 
     with open(base_dir + '/andrew_1d/1d_cosine_separated.pkl', 'rb') as f:
         data = pickle.load(f)
