@@ -219,6 +219,32 @@ class Datafeed(data.Dataset):
         return len(self.data)
 
 
+class DatafeedIndexed(data.Dataset):
+
+    def __init__(self, x_train, y_train, transform=None):
+        self.data = x_train
+        self.labels = y_train
+        self.transform = transform
+        self.targets = torch.Tensor([0]*x_train.shape[0]).reshape(-1, 1)
+        self.unlabeled_mask = np.ones(x_train.shape[0])
+
+    def __getitem__(self, index):
+        img = self.data[index]
+        if self.transform is not None:
+            img = self.transform(img)
+        if self.targets is not None:
+            return img, self.targets[index], index
+        else:
+            return img
+
+    def __len__(self):
+        return len(self.data)
+
+    def update_label(self, index):
+        self.targets[index] = self.labels[index]
+        self.unlabeled_mask[index] = 0
+
+
 def torch_onehot(y, Nclass):
     if y.is_cuda:
         y = y.type(torch.cuda.LongTensor)
