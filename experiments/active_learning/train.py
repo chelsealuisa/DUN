@@ -9,7 +9,7 @@ import torch
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 
-from src.utils import Datafeed, DatafeedIndexed, cprint
+from src.utils import Datafeed, DatafeedIndexed, cprint, mkdir
 from src.datasets.additional_gap_loader import load_my_1d, load_agw_1d, load_andrew_1d
 from src.datasets.additional_gap_loader import load_matern_1d, load_axis, load_origin, load_wiggle
 from src.probability import depth_categorical_VI
@@ -104,99 +104,113 @@ valloader = torch.utils.data.DataLoader(valset, batch_size=batch_size, shuffle=F
 testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False, pin_memory=True,
                                         num_workers=args.num_workers)
 
+# Experiment runs
+n_runs = 5
+results = np.zeros((args.n_queries, n_runs))
+results_train = np.zeros((args.n_queries, n_runs))
 
-# Instantiate model
-N_train = X_train.shape[0]
-input_dim = X_train.shape[1]
-output_dim = y_train.shape[1]
+for j in range(n_runs):
+    seed = j
+    mkdir(f'{args.savedir}/{name}/{j}')
 
-width = args.width
-n_layers = args.N_layers
-wd = args.wd
-lr = args.lr
+    # Reset train data
+    trainset.unlabeled_mask = np.ones(X_train.shape[0])
 
-if args.inference == 'MFVI':
-    prior_sig = 1
+    # Instantiate model
+    N_train = X_train.shape[0]
+    input_dim = X_train.shape[1]
+    output_dim = y_train.shape[1]
 
-    model = MFVI_regression_homo(input_dim=input_dim, output_dim=output_dim,
-                                 width=width, n_layers=n_layers, prior_sig=1)
+    width = args.width
+    n_layers = args.N_layers
+    wd = args.wd
+    lr = args.lr
 
-    net = regression_baseline_net_VI(model, N_train, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None, seed=None,
-                                     MC_samples=10, train_samples=5)
+    if args.inference == 'MFVI':
+        prior_sig = 1
 
-elif args.inference == 'Dropout':
-    model = dropout_regression_homo(input_dim=input_dim, output_dim=output_dim,
-                                    width=width, n_layers=n_layers, p_drop=0.1)
+        model = MFVI_regression_homo(input_dim=input_dim, output_dim=output_dim,
+                                    width=width, n_layers=n_layers, prior_sig=1)
 
-    net = regression_baseline_net(model, N_train, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None, seed=None,
-                                  MC_samples=10, weight_decay=wd)
-elif args.inference == 'SGD':
-    model = SGD_regression_homo(input_dim=input_dim, output_dim=output_dim,
-                                width=width, n_layers=n_layers)
+        net = regression_baseline_net_VI(model, N_train, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None, seed=None,
+                                        MC_samples=10, train_samples=5)
 
-    net = regression_baseline_net(model, N_train, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None, seed=None,
-                                  MC_samples=0, weight_decay=wd)
-elif args.inference == 'DUN':
+    elif args.inference == 'Dropout':
+        model = dropout_regression_homo(input_dim=input_dim, output_dim=output_dim,
+                                        width=width, n_layers=n_layers, p_drop=0.1)
 
-    if args.network == 'ResNet':
-        model = arq_uncert_fc_resnet(input_dim, output_dim, width, n_layers, w_prior=None, BMA_prior=False)
-    elif args.network == 'MLP':
-        model = arq_uncert_fc_MLP(input_dim, output_dim, width, n_layers, w_prior=None, BMA_prior=False)
-    else:
-        raise Exception('Bad network type. This should never raise as there is a previous assert.')
+        net = regression_baseline_net(model, N_train, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None, seed=None,
+                                    MC_samples=10, weight_decay=wd)
+    elif args.inference == 'SGD':
+        model = SGD_regression_homo(input_dim=input_dim, output_dim=output_dim,
+                                    width=width, n_layers=n_layers)
 
-    prior_probs = [1 / (n_layers + 1)] * (n_layers + 1)
-    prob_model = depth_categorical_VI(prior_probs, cuda=cuda)
-    net = DUN_VI(model, prob_model, N_train, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None,
-                 regression=True, pred_sig=None, weight_decay=wd)
+        net = regression_baseline_net(model, N_train, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None, seed=None,
+                                    MC_samples=0, weight_decay=wd)
+    elif args.inference == 'DUN':
+
+        if args.network == 'ResNet':
+            model = arq_uncert_fc_resnet(input_dim, output_dim, width, n_layers, w_prior=None, BMA_prior=False)
+        elif args.network == 'MLP':
+            model = arq_uncert_fc_MLP(input_dim, output_dim, width, n_layers, w_prior=None, BMA_prior=False)
+        else:
+            raise Exception('Bad network type. This should never raise as there is a previous assert.')
+
+        prior_probs = [1 / (n_layers + 1)] * (n_layers + 1)
+        prob_model = depth_categorical_VI(prior_probs, cuda=cuda)
+        net = DUN_VI(model, prob_model, N_train, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None,
+                    regression=True, pred_sig=None, weight_decay=wd)
 
 
-# Active learning loop
-best_err_train = []
-best_err_val = []
+    # Active learning loop
+    for i in range(args.n_queries):
+        
+        # Acquire data
+        acquire_samples(net, trainset, args.query_size)
+        
+        # Train model on labeled data
+        labeled_idx = np.where(trainset.unlabeled_mask == 0)[0]
+        labeledloader = torch.utils.data.DataLoader(
+            trainset, batch_size=batch_size, num_workers=args.num_workers, sampler=torch.utils.data.SubsetRandomSampler(labeled_idx)
+            )
+        
+        cprint('p', f'Query: {i}\tlabelled points: {len(labeled_idx)}')
 
-for query in range(args.n_queries):
-    
-    # Acquire data
-    acquire_samples(net, trainset, args.query_size)
-    
-    # Train model on labeled data
-    labeled_idx = np.where(trainset.unlabeled_mask == 0)[0]
-    labeledloader = torch.utils.data.DataLoader(
-        trainset, batch_size=batch_size, num_workers=args.num_workers, sampler=torch.utils.data.SubsetRandomSampler(labeled_idx)
-        )
-    
-    cprint('p', f'Query: {query}')
-    cprint('p', f'no. labelled: {len(labeled_idx)}')
+        if args.inference in ['MFVI', 'Dropout', 'SGD']:
+            marginal_loglike_estimate, train_mean_predictive_loglike, dev_mean_predictive_loglike, err_train, err_dev, \
+                approx_d_posterior, true_d_posterior, true_likelihood, exact_ELBO, basedir = \
+                train_fc_baseline(net, f'{name}/{j}', args.savedir, batch_size, epochs, labeledloader, valloader, cuda=cuda,
+                            flat_ims=False, nb_its_dev=nb_its_dev, early_stop=None,
+                            track_posterior=False, track_exact_ELBO=False, seed=seed, save_freq=nb_its_dev)
+        else:
+            marginal_loglike_estimate, train_mean_predictive_loglike, dev_mean_predictive_loglike, err_train, err_dev, \
+                approx_d_posterior, true_d_posterior, true_likelihood, exact_ELBO, basedir = \
+                train_fc_DUN(net, f'{name}/{j}', args.savedir, batch_size, epochs, labeledloader, valloader,
+                        cuda, seed=seed, flat_ims=False, nb_its_dev=nb_its_dev, early_stop=None,
+                        track_posterior=False, track_exact_ELBO=False, tags=None,
+                        load_path=None, save_freq=nb_its_dev)
 
-    if args.inference in ['MFVI', 'Dropout', 'SGD']:
-        marginal_loglike_estimate, train_mean_predictive_loglike, dev_mean_predictive_loglike, err_train, err_dev, \
-            approx_d_posterior, true_d_posterior, true_likelihood, exact_ELBO, basedir = \
-            train_fc_baseline(net, name, args.savedir, batch_size, epochs, labeledloader, valloader, cuda=cuda,
-                        flat_ims=False, nb_its_dev=nb_its_dev, early_stop=None,
-                        track_posterior=False, track_exact_ELBO=False, seed=0, save_freq=nb_its_dev)
-    else:
-        marginal_loglike_estimate, train_mean_predictive_loglike, dev_mean_predictive_loglike, err_train, err_dev, \
-            approx_d_posterior, true_d_posterior, true_likelihood, exact_ELBO, basedir = \
-            train_fc_DUN(net, name, args.savedir, batch_size, epochs, labeledloader, valloader,
-                    cuda, seed=0, flat_ims=False, nb_its_dev=nb_its_dev, early_stop=None,
-                    track_posterior=False, track_exact_ELBO=False, tags=None,
-                    load_path=None, save_freq=nb_its_dev)
+        # Record performance
+        min_train_error = min([err for err in err_train if err>0])
+        min_val_error = min([err for err in err_dev if err>0])
+        results_train[i,j] = min_train_error
+        results[i,j] = min_val_error
 
-    # Record performance
-    min_train_error = min([err for err in err_train if err>0])
-    min_val_error = min([err for err in err_dev if err>0])
-    best_err_train.append(min_train_error)
-    best_err_val.append(min_val_error)
+    cprint('p', f'Train errors: {results_train[:,j]}')
+    cprint('p', f'Val errors: {results[:,j]}\n')
 
-cprint('p', f'Train errs: {best_err_train}')
-cprint('p', f'Val errs: {best_err_val}\n')
+    # plot validation error
+    plt.figure(dpi=200)
+    plt.plot(results[:,j])
+    plt.xlabel('Query number')
+    plt.ylabel('Validation error')
+    plt.tight_layout()
+    plt.savefig(f'{args.savedir}/{name}/{j}/val_error.png', format='png', bbox_inches='tight')
 
-# plot validation error
-media_dir = basedir + '/media'
-plt.figure(dpi=200)
-plt.plot(best_err_val)
-plt.xlabel('Query number')
-plt.ylabel('Validation error')
-plt.tight_layout()
-plt.savefig(f'{args.savedir}/{name}/val_error.png', format='png', bbox_inches='tight')
+means = results.mean(axis=1).reshape(-1,1)
+stds = results.std(axis = 1).reshape(-1,1)
+results = np.concatenate((means, stds, results), axis=1)
+np.savetxt(f'{args.savedir}/{name}/results.csv', results, delimiter=',')
+
+toc = time()
+cprint('r', toc - tic)

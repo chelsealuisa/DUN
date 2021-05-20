@@ -8,7 +8,7 @@ def acquire_samples(model, dataset, query_size=10, query_strategy='random',
     
     # create data loader for pool
     poolloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, num_workers=num_workers,
-                                              sampler=torch.utils.data.SubsetRandomSampler(unlabeled_idx))
+                                             sampler=torch.utils.data.SubsetRandomSampler(unlabeled_idx))
        
     if query_strategy=='random':
         sample_idx = random_query(poolloader, query_size)
