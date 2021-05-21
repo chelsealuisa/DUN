@@ -371,3 +371,43 @@ def plot_calibration_curve(savefile, net, X_test, y_test, n_bins=10, dpi=200, sh
         plt.show()
     else:
         plt.close(fig=None)
+
+
+def plot_al_rmse(savefile, means, stds, n_queries, query_size, dpi=200, show=False):
+
+    plt.figure(dpi=dpi)
+    x = np.arange(query_size, (n_queries+1)*query_size, query_size)
+    plt.plot(x, means)
+    plt.fill_between(x, means+stds, means-stds, alpha=0.3)
+    plt.xlabel('Training points')
+    plt.ylabel('Validation RMSE')
+    plt.title(savefile.split('/')[1])
+
+    if savefile is not None:
+        plt.savefig(savefile + '.png', format='png', bbox_inches='tight')
+    if show:
+        plt.show()
+    else:
+        plt.close(fig=None)
+
+
+def plot_al_mean_rmse(savefile, dun, dropout, mfvi, sgd, dataset, 
+                      n_queries, query_size, dpi=200, show=False):
+
+    plt.figure(dpi=dpi)
+    x = np.arange(query_size, (n_queries+1)*query_size, query_size)[6:]
+    plt.plot(x, dun, c='tab:blue', label='DUN')
+    plt.plot(x, dropout, c='tab:red', label='Dropout')
+    plt.plot(x, mfvi, c='tab:purple', label='MFVI')
+    plt.plot(x, sgd, c='tab:orange', label='SGD')
+    plt.xlabel('Training points')
+    plt.ylabel('Mean validation RMSE')
+    plt.title(f'{dataset} dataset')
+    plt.legend()
+
+    if savefile is not None:
+        plt.savefig(savefile + '.png', format='png', bbox_inches='tight')
+    if show:
+        plt.show()
+    else:
+        plt.close(fig=None)
