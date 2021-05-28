@@ -12,10 +12,13 @@ from src.utils import mkdir, cprint
 def train_fc_DUN(net, name, save_dir, batch_size, nb_epochs, train_loader, val_loader,
               cuda, seed, flat_ims=False, nb_its_dev=1, early_stop=None,
               track_posterior=False, track_exact_ELBO=False, tags=None,
-              load_path=None, save_freq=None, q_nograd_its=0):
+              load_path=None, save_freq=None, q_nograd_its=0, basedir_prefix=None):
 
     rand_name = next(tempfile._get_candidate_names())
-    basedir = os.path.join(save_dir, name, rand_name)
+    if basedir_prefix:
+        basedir = os.path.join(save_dir, name, f'{basedir_prefix}_{rand_name}')
+    else:
+        basedir = os.path.join(save_dir, name, rand_name)
 
     media_dir = basedir + '/media/'
     models_dir = basedir + '/models/'
