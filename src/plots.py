@@ -395,7 +395,7 @@ def plot_al_mean_rmse(savefile, dun, dropout, mfvi, sgd, dataset,
                       n_queries, query_size, dpi=200, show=False):
 
     plt.figure(dpi=dpi)
-    x = np.arange(query_size, (n_queries+1)*query_size, query_size)[6:]
+    x = np.arange(query_size, (n_queries+1)*query_size, query_size)
     plt.plot(x, dun, c='tab:blue', label='DUN')
     plt.plot(x, dropout, c='tab:red', label='Dropout')
     plt.plot(x, mfvi, c='tab:purple', label='MFVI')
