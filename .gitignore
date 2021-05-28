@@ -272,6 +272,7 @@ results
 saves
 checkpoints
 save_models
+saves_regression
 *.pth.tar
 
 # slurm
