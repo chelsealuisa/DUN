@@ -181,7 +181,7 @@ class DUN(BaseNet):
             assert N_train == self.N_train
             cum_joint_loglike_per_depth = []
 
-            for x, y in trainloader:
+            for x, y, *_ in trainloader:
                 x, y = to_variable(var=(x, y), cuda=self.cuda)
                 if not self.regression:
                     y = y.long()
@@ -258,7 +258,7 @@ class DUN_VI(DUN):
             assert N_train == self.N_train
             cum_ELBO = []
 
-            for x, y in trainloader:
+            for x, y, *_ in trainloader:
                 x, y = to_variable(var=(x, y), cuda=self.cuda)
                 if not self.regression:
                     y = y.long()
