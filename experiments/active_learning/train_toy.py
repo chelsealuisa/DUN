@@ -27,6 +27,9 @@ matplotlib.use('Agg')
 
 tic = time()
 
+c = ['#1f77b4', '#d62728', '#ff7f0e', '#2ca02c', '#9467bd',
+     '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf', '#d62728']
+
 parser = argparse.ArgumentParser(description='Toy dataset running script')
 
 parser.add_argument('--n_epochs', type=int, default=4000,
@@ -167,6 +170,7 @@ for j in range(n_runs):
         
         # Acquire data
         acquire_samples(net, trainset, args.query_size)
+        n_labelled = int(sum(1 - trainset.unlabeled_mask))
         
         # Train model on labeled data
         labeled_idx = np.where(trainset.unlabeled_mask == 0)[0]
@@ -180,21 +184,82 @@ for j in range(n_runs):
             marginal_loglike_estimate, train_mean_predictive_loglike, dev_mean_predictive_loglike, err_train, err_dev, \
                 approx_d_posterior, true_d_posterior, true_likelihood, exact_ELBO, basedir = \
                 train_fc_baseline(net, f'{name}/{j}', args.savedir, batch_size, epochs, labeledloader, valloader, cuda=cuda,
-                            flat_ims=False, nb_its_dev=nb_its_dev, early_stop=None,
-                            track_posterior=False, track_exact_ELBO=False, seed=seed, save_freq=nb_its_dev)
+                            flat_ims=False, nb_its_dev=nb_its_dev, early_stop=None, track_posterior=False, 
+                            track_exact_ELBO=False, seed=seed, save_freq=nb_its_dev, basedir_prefix=n_labelled)
         else:
             marginal_loglike_estimate, train_mean_predictive_loglike, dev_mean_predictive_loglike, err_train, err_dev, \
                 approx_d_posterior, true_d_posterior, true_likelihood, exact_ELBO, basedir = \
                 train_fc_DUN(net, f'{name}/{j}', args.savedir, batch_size, epochs, labeledloader, valloader,
                         cuda, seed=seed, flat_ims=False, nb_its_dev=nb_its_dev, early_stop=None,
-                        track_posterior=False, track_exact_ELBO=False, tags=None,
-                        load_path=None, save_freq=nb_its_dev)
+                        track_posterior=True, track_exact_ELBO=False, tags=None,
+                        load_path=None, save_freq=nb_its_dev, basedir_prefix=n_labelled)
 
         # Record performance
         min_train_error = min([err for err in err_train if err>0])
         min_val_error = min([err for err in err_dev if err>0])
         results_train[i,j] = min_train_error
         results[i,j] = min_val_error
+
+        # Create plots
+        media_dir = basedir + '/media'
+        show_range = 5
+        ylim = 3
+        add_noise = False
+        
+        if args.inference == 'DUN':
+            np.savetxt(f'{media_dir}/approx_d_posterior.csv', approx_d_posterior, delimiter=',')
+            np.savetxt(f'{media_dir}/true_d_posterior.csv', true_d_posterior, delimiter=',')
+
+            x_view = np.linspace(-show_range, show_range, 8000)
+            subsample = 1
+            x_view = torch.Tensor(x_view).unsqueeze(1)
+            layer_preds = net.layer_predict(x_view).data.cpu().numpy()
+
+            # Layerwise predictive functions (separate image)
+            for i in range(layer_preds.shape[0]):
+                plt.figure(dpi=80)
+                plt.scatter(X_train[trainset.unlabeled_mask.astype(bool)], y_train[trainset.unlabeled_mask.astype(bool)], s=3, alpha=0.2, c=c[0])
+                plt.scatter(X_train[~trainset.unlabeled_mask.astype(bool)], y_train[~trainset.unlabeled_mask.astype(bool)], s=5, alpha=0.7, c='k')
+                _ = plt.plot(x_view[:, 0], layer_preds[i, :, 0].T, alpha=0.8, c='r')
+                plt.title(i)
+                plt.ylim([-ylim, ylim])
+                plt.xlim([-show_range, show_range])
+                plt.tight_layout()
+                plt.savefig(f'{media_dir}/{str(i)}_layerwise.png', format='png', bbox_inches='tight')
+                plt.close()
+
+            # Layerwise predictive functions (single image)
+            plt.figure(dpi=80)
+            plt.scatter(X_train[trainset.unlabeled_mask.astype(bool)], y_train[trainset.unlabeled_mask.astype(bool)], s=3, alpha=0.2, c=c[0])
+            plt.scatter(X_train[~trainset.unlabeled_mask.astype(bool)], y_train[~trainset.unlabeled_mask.astype(bool)], s=5, alpha=0.7, c='k')
+            for i in range(layer_preds.shape[0]):
+                plt.plot(x_view[:, 0], layer_preds[i, :, 0].T, alpha=0.8, c=c[i])
+            plt.title('Layerwise predictive functions')
+            plt.ylim([-ylim, ylim])
+            plt.xlim([-show_range, show_range])
+            plt.tight_layout()
+            plt.savefig(f'{media_dir}/layerwise.png', format='png', bbox_inches='tight')
+            plt.close()
+
+            # Posterior over depth
+            x = np.array([i for i in range(layer_preds.shape[0])])
+            height_true = true_d_posterior[-1,:]
+            height_approx = approx_d_posterior[-1,:]
+            
+            plt.figure(dpi=80)
+            plt.bar(x, height_true)
+            plt.title('Posterior distribution over depth')
+            plt.xlabel('Layer')
+            plt.savefig(f'{media_dir}/depth_post_true.png', format='png', bbox_inches='tight')
+            plt.close()
+            
+            plt.figure(dpi=80)
+            plt.bar(x, height_approx)
+            plt.title('Approximate posterior distribution over depth')
+            plt.xlabel('Layer')
+            plt.savefig(f'{media_dir}/depth_post_approx.png', format='png', bbox_inches='tight')
+            plt.close()
+
 
     cprint('p', f'Train errors: {results_train[:,j]}')
     cprint('p', f'Val errors: {results[:,j]}\n')
