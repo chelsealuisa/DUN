@@ -64,6 +64,9 @@ parser.add_argument('--n_queries', type=int,
 parser.add_argument('--query_size', type=int, 
                     help='number of acquired data points in active learning (default: 10)',
                     default=10)
+parser.add_argument('--init_train', type=int, 
+                    help='number of labelled observations in initial train set (default: 10)',
+                    default=10)
 
 args = parser.parse_args()
 
@@ -75,7 +78,7 @@ epochs = args.n_epochs
 nb_its_dev = 5
 
 name = '_'.join([args.inference, args.dataset, str(args.N_layers), str(args.width), str(args.lr), str(args.wd),
-                 str(args.overcount)])
+                 str(args.overcount), str(args.init_train), '_v2'])
 if args.network == 'MLP':
     name += '_MLP'
 
@@ -98,7 +101,6 @@ elif args.dataset in uci_names + uci_gap_names:
     X_train, X_test, _, _, y_train, y_test, y_means, y_stds = \
         load_gap_UCI(base_dir=args.datadir, dname=args.dataset, n_split=int(args.split), gap=gap)
 
-trainset = DatafeedIndexed(torch.Tensor(X_train), torch.Tensor(y_train), transform=None)
 testset = Datafeed(torch.Tensor(X_test), torch.Tensor(y_test), transform=None)
 
 N_train = X_train.shape[0]
@@ -122,7 +124,8 @@ for j in range(n_runs):
     mkdir(f'{args.savedir}/{name}/{j}')
 
     # Reset train data
-    trainset.unlabeled_mask = np.ones(X_train.shape[0])
+    trainset = DatafeedIndexed(torch.Tensor(X_train), torch.Tensor(y_train), args.init_train, transform=None)
+    n_labelled = int(sum(1 - trainset.unlabeled_mask))
 
     # Instantiate model
     width = args.width
@@ -168,10 +171,6 @@ for j in range(n_runs):
 
     # Active learning loop
     for i in range(args.n_queries):
-        
-        # Acquire data
-        acquire_samples(net, trainset, args.query_size)
-        n_labelled = int(sum(1 - trainset.unlabeled_mask))
         
         # Train model on labeled data
         labeled_idx = np.where(trainset.unlabeled_mask == 0)[0]
@@ -229,6 +228,10 @@ for j in range(n_runs):
             plt.xlabel('Layer')
             plt.savefig(f'{media_dir}/depth_post_approx.png', format='png', bbox_inches='tight')
             plt.close()
+
+        # Acquire data
+        acquire_samples(net, trainset, args.query_size)
+        n_labelled = int(sum(1 - trainset.unlabeled_mask))
 
     cprint('p', f'Train errors: {results_train[:,j]}')
     cprint('p', f'Val errors: {results[:,j]}\n')

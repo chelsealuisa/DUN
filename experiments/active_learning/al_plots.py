@@ -11,11 +11,24 @@ files = [
     #'DUN_wiggle_10_100_0.001_0.0001_1',
     #'MFVI_wiggle_3_100_0.001_0.0001_1',
     #'SGD_wiggle_3_100_0.001_0.0001_1',
-    'DUN_boston_10_100_0.001_0.0001_1',
+    #'DUN_boston_10_100_0.001_0.0001_1',
     #'Dropout_boston_3_100_0.001_0.0001_1'
+    #'DUN_agw_1d_10_100_0.001_0.0001_1',
+    #'DUN_wiggle_10_100_0.001_0.0001_1',
+    #'DUN_wiggle_10_100_0.001_0.0001_1_50',
+    #'DUN_boston_4_100_0.001_0.0001_1',
+    #'DUN_boston_4_100_0.001_0.0001_1_10',
+    #'DUN_boston_5_100_0.001_0.0001_1',
+    #'Dropout_wiggle_10_100_0.001_0.0001_1_10',
+    #'SGD_wiggle_10_100_0.001_0.0001_1_10',
+    #'SGD_boston_10_100_0.001_0.0001_1_10'
+    #'DUN_wiggle_5_100_0.001_0.0001_1_10'
+    'DUN_andrew_1d_10_100_0.001_0.0001_1_10',
+    'DUN_matern_1d_10_100_0.0001_0.0001_1_10',
+    'DUN_my_1d_10_100_0.001_0.0001_1_10'
 ]
 
-savedir = 'saves_regression'
+savedir = 'saves'
 
 for file in files:
     results = np.genfromtxt(f'{savedir}/{file}/results.csv', delimiter=',')
@@ -23,6 +36,8 @@ for file in files:
     stds = results[:,1]
     if file.split('_')[1]=='wiggle':
         n_queries = 20
+    elif file.split('_')[1]=='andrew':
+        n_queries = 7
     else:
         n_queries = 30
     query_size = 10

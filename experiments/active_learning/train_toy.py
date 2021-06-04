@@ -57,6 +57,9 @@ parser.add_argument('--n_queries', type=int,
 parser.add_argument('--query_size', type=int, 
                     help='number of acquired data points in active learning (default: 10)',
                     default=10)
+parser.add_argument('--init_train', type=int, 
+                    help='number of labelled observations in initial train set (default: 10)',
+                    default=10)
 
 args = parser.parse_args()
 
@@ -68,7 +71,7 @@ epochs = args.n_epochs
 nb_its_dev = 5
 
 name = '_'.join([args.inference, args.dataset, str(args.N_layers), str(args.width), str(args.lr), str(args.wd),
-                 str(args.overcount)])
+                str(args.overcount), str(args.init_train)])
 if args.network == 'MLP':
     name += '_MLP'
 
@@ -97,9 +100,13 @@ elif args.dataset == 'wiggle':
 X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.20, random_state=42)
 X_val, X_test, y_val, y_test = train_test_split(X_val, y_val, test_size=0.50, random_state=42)
 
-trainset = DatafeedIndexed(torch.Tensor(X_train), torch.Tensor(y_train), transform=None)
 valset = Datafeed(torch.Tensor(X_val), torch.Tensor(y_val), transform=None)
 testset = Datafeed(torch.Tensor(X_test), torch.Tensor(y_test), transform=None)
+
+N_train = X_train.shape[0]
+input_dim = X_train.shape[1]
+output_dim = y_train.shape[1]
+
 print(X_train.shape, y_train.shape, X_val.shape, y_val.shape, X_test.shape, y_test.shape)
 
 valloader = torch.utils.data.DataLoader(valset, batch_size=batch_size, shuffle=False, pin_memory=True,
@@ -117,13 +124,10 @@ for j in range(n_runs):
     mkdir(f'{args.savedir}/{name}/{j}')
 
     # Reset train data
-    trainset.unlabeled_mask = np.ones(X_train.shape[0])
+    trainset = DatafeedIndexed(torch.Tensor(X_train), torch.Tensor(y_train), args.init_train, transform=None)
+    n_labelled = int(sum(1 - trainset.unlabeled_mask))
 
     # Instantiate model
-    N_train = X_train.shape[0]
-    input_dim = X_train.shape[1]
-    output_dim = y_train.shape[1]
-
     width = args.width
     n_layers = args.N_layers
     wd = args.wd
@@ -168,17 +172,13 @@ for j in range(n_runs):
     # Active learning loop
     for i in range(args.n_queries):
         
-        # Acquire data
-        acquire_samples(net, trainset, args.query_size)
-        n_labelled = int(sum(1 - trainset.unlabeled_mask))
-        
         # Train model on labeled data
         labeled_idx = np.where(trainset.unlabeled_mask == 0)[0]
         labeledloader = torch.utils.data.DataLoader(
             trainset, batch_size=batch_size, num_workers=args.num_workers, sampler=torch.utils.data.SubsetRandomSampler(labeled_idx)
             )
         
-        cprint('p', f'Query: {i}\tlabelled points: {len(labeled_idx)}')
+        cprint('p', f'Query: {i}\tno. labelled points: {len(labeled_idx)}')
 
         if args.inference in ['MFVI', 'Dropout', 'SGD']:
             marginal_loglike_estimate, train_mean_predictive_loglike, dev_mean_predictive_loglike, err_train, err_dev, \
@@ -241,6 +241,21 @@ for j in range(n_runs):
             plt.savefig(f'{media_dir}/layerwise.png', format='png', bbox_inches='tight')
             plt.close()
 
+            # Layerwise predictions mean and std dev
+            means = np.average(layer_preds[:,:,0], axis=0, weights=approx_d_posterior[-1,:])
+            stds = layer_preds[:,:,0].std(axis=0)
+            plt.figure(dpi=80)
+            plt.scatter(X_train[trainset.unlabeled_mask.astype(bool)], y_train[trainset.unlabeled_mask.astype(bool)], s=3, alpha=0.2, c=c[0])
+            plt.scatter(X_train[~trainset.unlabeled_mask.astype(bool)], y_train[~trainset.unlabeled_mask.astype(bool)], s=5, alpha=0.7, c='k')
+            plt.plot(x_view[:, 0], means, alpha=1, c=c[3])
+            plt.fill_between(x_view[:, 0], means+stds, means-stds, alpha=0.1, color=c[3])
+            plt.title('Mean predictive function')
+            plt.ylim([-ylim, ylim])
+            plt.xlim([-show_range, show_range])
+            plt.tight_layout()
+            plt.savefig(f'{media_dir}/mean_layerwise.png', format='png', bbox_inches='tight')
+            plt.close()
+
             # Posterior over depth
             x = np.array([i for i in range(layer_preds.shape[0])])
             height_true = true_d_posterior[-1,:]
@@ -258,7 +273,11 @@ for j in range(n_runs):
             plt.title('Approximate posterior distribution over depth')
             plt.xlabel('Layer')
             plt.savefig(f'{media_dir}/depth_post_approx.png', format='png', bbox_inches='tight')
-            plt.close()
+            plt.close()    
+
+        # Acquire data
+        acquire_samples(net, trainset, args.query_size)
+        n_labelled = int(sum(1 - trainset.unlabeled_mask))
 
 
     cprint('p', f'Train errors: {results_train[:,j]}')
