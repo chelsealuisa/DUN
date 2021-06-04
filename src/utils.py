@@ -1,3 +1,4 @@
+from matplotlib.rcsetup import update_savefig_format
 import os
 import sys
 import pickle
@@ -221,12 +222,20 @@ class Datafeed(data.Dataset):
 
 class DatafeedIndexed(data.Dataset):
 
-    def __init__(self, x_train, y_train, transform=None):
+    def __init__(self, x_train, y_train, train_size, transform=None):
         self.data = x_train
         self.labels = y_train
         self.transform = transform
         self.targets = torch.Tensor([0]*x_train.shape[0]).reshape(-1, 1)
-        self.unlabeled_mask = np.ones(x_train.shape[0])
+        
+        np.random.seed(0)
+        unlabeled_mask = np.ones(x_train.shape[0])
+        unlabeled_mask[:train_size] = 0
+        np.random.shuffle(unlabeled_mask)
+        self.unlabeled_mask = unlabeled_mask
+        labeled_idx = np.where(self.unlabeled_mask == 0)[0]
+        for i in labeled_idx:
+            self.update_label(i)
 
     def __getitem__(self, index):
         img = self.data[index]
