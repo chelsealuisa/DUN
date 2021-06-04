@@ -25,6 +25,8 @@ def random_query(dataloader, query_size=10):
     Randomly select samples from the pool for which to acquire labels.
     Since data is already shuffled in the DataLoader, simply select the first `query_size` samples.
     """
+    torch.manual_seed(0)
+    
     sample_idx = []
     
     for batch in dataloader:
