@@ -234,6 +234,9 @@ class DUN_VI(DUN):
                                                                         get_std=True)
             mean_pred_negloglike = self.f_neg_loglike(means, y, model_std=model_stds).mean(dim=0).data
             err = rms(means, y).item()
+
+            return ELBO.data.item(), mean_pred_negloglike.item(), err, means - y
+
         else:
             probs = depth_categorical.marginalise_d_predict(act_vec.data, self.prob_model.current_posterior,
                                                             depth=None, softmax=(not self.regression))
@@ -241,8 +244,7 @@ class DUN_VI(DUN):
             pred = probs.max(dim=1, keepdim=False)[1]  # get the index of the max probability
             err = pred.ne(y.data).sum().item() / y.shape[0]
 
-        # print(ELBO.shape, mean_pred_loglike.shape, err.shape)
-        return ELBO.data.item(), mean_pred_negloglike.item(), err
+            return ELBO.data.item(), mean_pred_negloglike.item(), err
 
     def get_exact_ELBO(self, trainloader, train_bn=False):
         """Get exact ELBO with full forward pass"""

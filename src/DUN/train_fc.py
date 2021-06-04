@@ -54,6 +54,9 @@ def train_fc_DUN(net, name, save_dir, batch_size, nb_epochs, train_loader, val_l
     if q_nograd_its > 0:
         net.prob_model.q_logits.requires_grad = False
 
+    x, y, *_ = next(iter(train_loader))
+    per_example_errors = np.zeros((3*nb_epochs, x.shape[0]+1))
+    
     tic0 = time.time()
     for i in range(epoch, nb_epochs):
         if q_nograd_its > 0 and i == q_nograd_its:
@@ -66,7 +69,7 @@ def train_fc_DUN(net, name, save_dir, batch_size, nb_epochs, train_loader, val_l
             if flat_ims:
                 x = x.view(x.shape[0], -1)
 
-            marg_loglike_estimate, minus_loglike, err = net.fit(x, y)
+            marg_loglike_estimate, minus_loglike, err, example_errors = net.fit(x, y)
 
             marginal_loglike_estimate[i] += marg_loglike_estimate * x.shape[0]
             err_train[i] += err * x.shape[0]
@@ -78,11 +81,21 @@ def train_fc_DUN(net, name, save_dir, batch_size, nb_epochs, train_loader, val_l
         err_train[i] /= nb_samples
 
         toc = time.time()
+        
+        # TODO: make work for both toy and reg datasets
+        per_example_errors[i*2:(i*2+2),0] = str(i)
+        per_example_errors[i*2,1:] = y.cpu().detach().numpy().reshape(-1)
+        per_example_errors[i*2+1,1:] = example_errors.cpu().detach().numpy().reshape(-1)
+        #per_example_errors[i*3:(i*3+3),0] = str(i)
+        #per_example_errors[i*3,1:] = x.cpu().detach().numpy().reshape(-1)
+        #per_example_errors[i*3+1,1:] = y.cpu().detach().numpy().reshape(-1)
+        #per_example_errors[i*3+2,1:] = example_errors.cpu().detach().numpy().reshape(-1)
 
         # ---- print
         print('\n depth approx posterior', net.prob_model.current_posterior.data.cpu().numpy())
         print("it %d/%d, ELBO/evidence %.4f, pred minus loglike = %f, err = %f" %
               (i, nb_epochs, marginal_loglike_estimate[i], train_mean_predictive_loglike[i], err_train[i]), end="")
+        print(f'\n max error: {max(abs(example_errors)).item()}')
 
         cprint('r', '   time: %f seconds\n' % (toc - tic))
         net.update_lr()
@@ -146,6 +159,8 @@ def train_fc_DUN(net, name, save_dir, batch_size, nb_epochs, train_loader, val_l
         true_likelihood = np.stack(true_likelihood, axis=0)
     if track_exact_ELBO:
         exact_ELBO = np.stack(exact_ELBO, axis=0)
+
+    np.savetxt(f'{media_dir}/per_example_errors.csv', per_example_errors, delimiter=',')
 
     return marginal_loglike_estimate, train_mean_predictive_loglike, dev_mean_predictive_loglike, err_train, err_dev, \
            approx_d_posterior, true_d_posterior, true_likelihood, exact_ELBO, basedir
