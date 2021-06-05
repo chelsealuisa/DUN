@@ -17,6 +17,12 @@ def train_fc_DUN(net, name, save_dir, batch_size, nb_epochs, train_loader, val_l
     rand_name = next(tempfile._get_candidate_names())
     if basedir_prefix:
         basedir = os.path.join(save_dir, name, f'{basedir_prefix}_{rand_name}')
+        trainsize = int(basedir_prefix)
+        x, y, *_ = next(iter(train_loader))
+        if x.shape[1]==1:
+            per_example_errors = np.zeros((3*nb_epochs, trainsize+1))
+        else:
+            per_example_errors = np.zeros((2*nb_epochs, trainsize+1))
     else:
         basedir = os.path.join(save_dir, name, rand_name)
 
@@ -53,9 +59,6 @@ def train_fc_DUN(net, name, save_dir, batch_size, nb_epochs, train_loader, val_l
 
     if q_nograd_its > 0:
         net.prob_model.q_logits.requires_grad = False
-
-    x, y, *_ = next(iter(train_loader))
-    per_example_errors = np.zeros((3*nb_epochs, x.shape[0]+1))
     
     tic0 = time.time()
     for i in range(epoch, nb_epochs):
@@ -65,6 +68,9 @@ def train_fc_DUN(net, name, save_dir, batch_size, nb_epochs, train_loader, val_l
         net.set_mode_train(True)
         tic = time.time()
         nb_samples = 0
+        xs = []
+        ys = []
+        errs = []
         for x, y, *_ in train_loader:
             if flat_ims:
                 x = x.view(x.shape[0], -1)
@@ -76,16 +82,31 @@ def train_fc_DUN(net, name, save_dir, batch_size, nb_epochs, train_loader, val_l
             train_mean_predictive_loglike[i] += minus_loglike * x.shape[0]
             nb_samples += len(x)
 
+            if x.shape[1]==1:
+                xs.extend(x.cpu().detach().numpy().reshape(-1))
+            ys.extend(y.cpu().detach().numpy().reshape(-1))
+            errs.extend(example_errors.cpu().detach().numpy().reshape(-1))
+
         marginal_loglike_estimate[i] /= nb_samples
         train_mean_predictive_loglike[i] /= nb_samples
         err_train[i] /= nb_samples
 
         toc = time.time()
         
+        if x.shape[1]==1:
+            per_example_errors[i*3:(i*3+3),0] = str(i)
+            per_example_errors[i*3,1:] = np.array(xs)
+            per_example_errors[i*3+1,1:] = np.array(ys)
+            per_example_errors[i*3+2,1:] = np.array(errs)
+        else:
+            per_example_errors[i*2:(i*2+2),0] = str(i)
+            per_example_errors[i*2,1:] = np.array(ys)
+            per_example_errors[i*2+1,1:] = np.array(errs)
+                
         # TODO: make work for both toy and reg datasets
-        per_example_errors[i*2:(i*2+2),0] = str(i)
-        per_example_errors[i*2,1:] = y.cpu().detach().numpy().reshape(-1)
-        per_example_errors[i*2+1,1:] = example_errors.cpu().detach().numpy().reshape(-1)
+        #per_example_errors[i*2:(i*2+2),0] = str(i)
+        #per_example_errors[i*2,1:] = y.cpu().detach().numpy().reshape(-1)
+        #per_example_errors[i*2+1,1:] = example_errors.cpu().detach().numpy().reshape(-1)
         #per_example_errors[i*3:(i*3+3),0] = str(i)
         #per_example_errors[i*3,1:] = x.cpu().detach().numpy().reshape(-1)
         #per_example_errors[i*3+1,1:] = y.cpu().detach().numpy().reshape(-1)
