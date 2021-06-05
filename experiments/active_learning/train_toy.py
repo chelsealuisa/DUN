@@ -8,6 +8,7 @@ import numpy as np
 import torch
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
+from torch.functional import norm
 
 from src.utils import Datafeed, DatafeedIndexed, cprint, mkdir
 from src.datasets.additional_gap_loader import load_my_1d, load_agw_1d, load_andrew_1d
@@ -22,6 +23,7 @@ from src.baselines.mfvi import MFVI_regression_homo
 from src.baselines.training_wrappers import regression_baseline_net, regression_baseline_net_VI
 from src.baselines.train_fc import train_fc_baseline
 from src.acquisition_fns import acquire_samples
+from src.plots import plot_al_rmse
 
 matplotlib.use('Agg')
 
@@ -60,6 +62,9 @@ parser.add_argument('--query_size', type=int,
 parser.add_argument('--init_train', type=int, 
                     help='number of labelled observations in initial train set (default: 10)',
                     default=10)
+parser.add_argument('--prior_decay', type=float, 
+                    help='rate of decay for non-uniform prior distribution (default: None)',
+                    default=None)
 
 args = parser.parse_args()
 
@@ -74,6 +79,8 @@ name = '_'.join([args.inference, args.dataset, str(args.N_layers), str(args.widt
                 str(args.overcount), str(args.init_train)])
 if args.network == 'MLP':
     name += '_MLP'
+if args.prior_decay:
+    name += f'_{args.prior_decay}'
 
 cuda = (args.gpu is not None)
 if cuda:
@@ -163,7 +170,14 @@ for j in range(n_runs):
         else:
             raise Exception('Bad network type. This should never raise as there is a previous assert.')
 
-        prior_probs = [1 / (n_layers + 1)] * (n_layers + 1)
+        if args.prior_decay:
+            prior_probs = [(1 - args.prior_decay)**i for i in range(n_layers+1)]
+            norm_term = sum(prior_probs)
+            prior_probs = [p/norm_term for p in prior_probs]
+        else:
+            prior_probs = [1 / (n_layers + 1)] * (n_layers + 1)
+        
+        cprint('y', f'prior dist: {prior_probs}')
         prob_model = depth_categorical_VI(prior_probs, cuda=cuda)
         net = DUN_VI(model, prob_model, N_train, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None,
                     regression=True, pred_sig=None, weight_decay=wd)
@@ -215,7 +229,7 @@ for j in range(n_runs):
             x_view = torch.Tensor(x_view).unsqueeze(1)
             layer_preds = net.layer_predict(x_view).data.cpu().numpy()
 
-            # Layerwise predictive functions (separate image)
+            # Layerwise predictive functions (separate images)
             for i in range(layer_preds.shape[0]):
                 plt.figure(dpi=80)
                 plt.scatter(X_train[trainset.unlabeled_mask.astype(bool)], y_train[trainset.unlabeled_mask.astype(bool)], s=3, alpha=0.2, c=c[0])
@@ -242,13 +256,19 @@ for j in range(n_runs):
             plt.close()
 
             # Layerwise predictions mean and std dev
-            means = np.average(layer_preds[:,:,0], axis=0, weights=approx_d_posterior[-1,:])
-            stds = layer_preds[:,:,0].std(axis=0)
+            pred_mu, pred_std = net.predict(x_view, get_std=True, return_model_std=True)
+            pred_mu = pred_mu.data.cpu().numpy()
+            pred_std = pred_std.data.cpu().numpy()
+            noise_std = net.f_neg_loglike.log_std.exp().data.cpu().numpy()
+
             plt.figure(dpi=80)
             plt.scatter(X_train[trainset.unlabeled_mask.astype(bool)], y_train[trainset.unlabeled_mask.astype(bool)], s=3, alpha=0.2, c=c[0])
             plt.scatter(X_train[~trainset.unlabeled_mask.astype(bool)], y_train[~trainset.unlabeled_mask.astype(bool)], s=5, alpha=0.7, c='k')
-            plt.plot(x_view[:, 0], means, alpha=1, c=c[3])
-            plt.fill_between(x_view[:, 0], means+stds, means-stds, alpha=0.1, color=c[3])
+            plt.plot(x_view, pred_mu, c=c[3])
+            plt.fill_between(x_view[:,0], 
+                             pred_mu[:,0] + (pred_std[:,0]**2 + noise_std**2)**0.5, 
+                             pred_mu[:,0] - (pred_std[:,0]**2 + noise_std**2)**0.5, 
+                             alpha=0.2, color=c[3])
             plt.title('Mean predictive function')
             plt.ylim([-ylim, ylim])
             plt.xlim([-show_range, show_range])
@@ -285,9 +305,10 @@ for j in range(n_runs):
 
     # plot validation error
     plt.figure(dpi=200)
-    plt.plot(results[:,j])
-    plt.xlabel('Query number')
-    plt.ylabel('Validation error')
+    x = np.arange(args.init_train, args.init_train + args.n_queries*args.query_size, args.query_size)
+    plt.plot(x, results[:,j])
+    plt.xlabel('Train set size')
+    plt.ylabel('Validation RMSE')
     plt.tight_layout()
     plt.savefig(f'{args.savedir}/{name}/{j}/val_error.png', format='png', bbox_inches='tight')
 
@@ -295,6 +316,7 @@ means = results.mean(axis=1).reshape(-1,1)
 stds = results.std(axis = 1).reshape(-1,1)
 results = np.concatenate((means, stds, results), axis=1)
 np.savetxt(f'{args.savedir}/{name}/results.csv', results, delimiter=',')
+plot_al_rmse(f'{args.savedir}/{name}/rmse_plot', means.reshape(-1), stds.reshape(-1), args.n_queries, args.query_size, args.init_train)
 
 toc = time()
 cprint('r', toc - tic)
