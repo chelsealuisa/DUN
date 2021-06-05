@@ -29,6 +29,7 @@ files = [
 ]
 
 savedir = 'saves'
+init_train_size = 10
 
 for file in files:
     results = np.genfromtxt(f'{savedir}/{file}/results.csv', delimiter=',')
@@ -41,7 +42,7 @@ for file in files:
     else:
         n_queries = 30
     query_size = 10
-    plot_al_rmse(f'{savedir}/{file}/rmse_plot', means, stds, n_queries, query_size)
+    plot_al_rmse(f'{savedir}/{file}/rmse_plot', means, stds, n_queries, query_size, init_train_size)
 
 '''
 # Mean of all methods

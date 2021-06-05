@@ -21,6 +21,7 @@ from src.baselines.mfvi import MFVI_regression_homo
 from src.baselines.training_wrappers import regression_baseline_net, regression_baseline_net_VI
 from src.baselines.train_fc import train_fc_baseline
 from src.acquisition_fns import acquire_samples
+from src.plots import plot_al_rmse
 
 matplotlib.use('Agg')
 
@@ -35,7 +36,7 @@ parser = argparse.ArgumentParser(description='Regression dataset running script'
 parser.add_argument('--n_epochs', type=int, default=4000,
                     help='number of iterations performed by the optimizer (default: 4000)')
 parser.add_argument('--dataset', help='which dataset to trian on',
-                    choices=["flights"]+uci_names+uci_gap_names)
+                    choices=['flights']+uci_names+uci_gap_names)
 parser.add_argument('--split', help='dataset split to train on (default: 0)',
                     type=str, default="0")
 parser.add_argument('--datadir', type=str, help='where to save dataset (default: ../data/)',
@@ -78,7 +79,7 @@ epochs = args.n_epochs
 nb_its_dev = 5
 
 name = '_'.join([args.inference, args.dataset, str(args.N_layers), str(args.width), str(args.lr), str(args.wd),
-                 str(args.overcount), str(args.init_train), '_v2'])
+                 str(args.overcount), str(args.init_train)])
 if args.network == 'MLP':
     name += '_MLP'
 
@@ -239,9 +240,10 @@ for j in range(n_runs):
 
     # plot validation error
     plt.figure(dpi=200)
-    plt.plot(results[:,j])
-    plt.xlabel('Query number')
-    plt.ylabel('Validation error')
+    x = np.arange(args.init_train, args.init_train + args.n_queries*args.query_size, args.query_size)
+    plt.plot(x, results[:,j])
+    plt.xlabel('Train set size')
+    plt.ylabel('Validation RMSE')
     plt.tight_layout()
     plt.savefig(f'{args.savedir}/{name}/{j}/val_error.png', format='png', bbox_inches='tight')
 
@@ -249,6 +251,7 @@ means = results.mean(axis=1).reshape(-1,1)
 stds = results.std(axis=1).reshape(-1,1)
 results = np.concatenate((means, stds, results), axis=1)
 np.savetxt(f'{args.savedir}/{name}/results.csv', results, delimiter=',')
+plot_al_rmse(f'{args.savedir}/{name}/rmse_plot', means.reshape(-1), stds.reshape(-1), args.n_queries, args.query_size, args.init_train)
 
 toc = time()
 cprint('r', toc - tic)

@@ -373,13 +373,13 @@ def plot_calibration_curve(savefile, net, X_test, y_test, n_bins=10, dpi=200, sh
         plt.close(fig=None)
 
 
-def plot_al_rmse(savefile, means, stds, n_queries, query_size, dpi=200, show=False):
+def plot_al_rmse(savefile, means, stds, n_queries, query_size, init_train_size=10, dpi=200, show=False):
 
     plt.figure(dpi=dpi)
-    x = np.arange(query_size, (n_queries+1)*query_size, query_size)
+    x = np.arange(init_train_size, init_train_size + n_queries*query_size, query_size)
     plt.plot(x, means)
     plt.fill_between(x, means+stds, means-stds, alpha=0.3)
-    plt.xlabel('Training points')
+    plt.xlabel('Train set size')
     plt.ylabel('Validation RMSE')
     plt.title(savefile.split('/')[1])
 
