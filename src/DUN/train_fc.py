@@ -93,24 +93,16 @@ def train_fc_DUN(net, name, save_dir, batch_size, nb_epochs, train_loader, val_l
 
         toc = time.time()
         
-        if x.shape[1]==1:
-            per_example_errors[i*3:(i*3+3),0] = str(i)
-            per_example_errors[i*3,1:] = np.array(xs)
-            per_example_errors[i*3+1,1:] = np.array(ys)
-            per_example_errors[i*3+2,1:] = np.array(errs)
-        else:
-            per_example_errors[i*2:(i*2+2),0] = str(i)
-            per_example_errors[i*2,1:] = np.array(ys)
-            per_example_errors[i*2+1,1:] = np.array(errs)
-                
-        # TODO: make work for both toy and reg datasets
-        #per_example_errors[i*2:(i*2+2),0] = str(i)
-        #per_example_errors[i*2,1:] = y.cpu().detach().numpy().reshape(-1)
-        #per_example_errors[i*2+1,1:] = example_errors.cpu().detach().numpy().reshape(-1)
-        #per_example_errors[i*3:(i*3+3),0] = str(i)
-        #per_example_errors[i*3,1:] = x.cpu().detach().numpy().reshape(-1)
-        #per_example_errors[i*3+1,1:] = y.cpu().detach().numpy().reshape(-1)
-        #per_example_errors[i*3+2,1:] = example_errors.cpu().detach().numpy().reshape(-1)
+        if basedir_prefix:
+            if x.shape[1]==1:
+                per_example_errors[i*3:(i*3+3),0] = str(i)
+                per_example_errors[i*3,1:] = np.array(xs)
+                per_example_errors[i*3+1,1:] = np.array(ys)
+                per_example_errors[i*3+2,1:] = np.array(errs)
+            else:
+                per_example_errors[i*2:(i*2+2),0] = str(i)
+                per_example_errors[i*2,1:] = np.array(ys)
+                per_example_errors[i*2+1,1:] = np.array(errs)
 
         # ---- print
         print('\n depth approx posterior', net.prob_model.current_posterior.data.cpu().numpy())
@@ -181,7 +173,8 @@ def train_fc_DUN(net, name, save_dir, batch_size, nb_epochs, train_loader, val_l
     if track_exact_ELBO:
         exact_ELBO = np.stack(exact_ELBO, axis=0)
 
-    np.savetxt(f'{media_dir}/per_example_errors.csv', per_example_errors, delimiter=',')
+    #if basedir_prefix:
+    #    np.savetxt(f'{media_dir}/per_example_errors.csv', per_example_errors, delimiter=',')
 
     return marginal_loglike_estimate, train_mean_predictive_loglike, dev_mean_predictive_loglike, err_train, err_dev, \
            approx_d_posterior, true_d_posterior, true_likelihood, exact_ELBO, basedir
