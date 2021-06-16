@@ -5,6 +5,7 @@ from time import time
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+import pickle as pl
 import torch
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
@@ -23,7 +24,7 @@ from src.baselines.mfvi import MFVI_regression_homo
 from src.baselines.training_wrappers import regression_baseline_net, regression_baseline_net_VI
 from src.baselines.train_fc import train_fc_baseline
 from src.acquisition_fns import acquire_samples
-from src.plots import plot_al_rmse
+from src.plots import plot_al_rmse, plot_mean_d_posterior
 
 matplotlib.use('Agg')
 
@@ -59,6 +60,8 @@ parser.add_argument('--n_queries', type=int,
 parser.add_argument('--query_size', type=int, 
                     help='number of acquired data points in active learning (default: 10)',
                     default=10)
+parser.add_argument('--query_strategy', choices=['random','entropy','variance'], 
+                    help='type of acquisition function (default: random)', default='random')
 parser.add_argument('--init_train', type=int, 
                     help='number of labelled observations in initial train set (default: 10)',
                     default=10)
@@ -81,6 +84,8 @@ if args.network == 'MLP':
     name += '_MLP'
 if args.prior_decay:
     name += f'_{args.prior_decay}'
+if args.query_strategy != 'random':
+    name += f'_{args.query_strategy}'
 
 cuda = (args.gpu is not None)
 if cuda:
@@ -134,58 +139,56 @@ for j in range(n_runs):
     trainset = DatafeedIndexed(torch.Tensor(X_train), torch.Tensor(y_train), args.init_train, transform=None)
     n_labelled = int(sum(1 - trainset.unlabeled_mask))
 
-    # Instantiate model
-    width = args.width
-    n_layers = args.N_layers
-    wd = args.wd
-    lr = args.lr
-
-    if args.inference == 'MFVI':
-        prior_sig = 1
-
-        model = MFVI_regression_homo(input_dim=input_dim, output_dim=output_dim,
-                                    width=width, n_layers=n_layers, prior_sig=1)
-
-        net = regression_baseline_net_VI(model, N_train, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None, seed=None,
-                                        MC_samples=10, train_samples=5)
-
-    elif args.inference == 'Dropout':
-        model = dropout_regression_homo(input_dim=input_dim, output_dim=output_dim,
-                                        width=width, n_layers=n_layers, p_drop=0.1)
-
-        net = regression_baseline_net(model, N_train, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None, seed=None,
-                                    MC_samples=10, weight_decay=wd)
-    elif args.inference == 'SGD':
-        model = SGD_regression_homo(input_dim=input_dim, output_dim=output_dim,
-                                    width=width, n_layers=n_layers)
-
-        net = regression_baseline_net(model, N_train, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None, seed=None,
-                                    MC_samples=0, weight_decay=wd)
-    elif args.inference == 'DUN':
-
-        if args.network == 'ResNet':
-            model = arq_uncert_fc_resnet(input_dim, output_dim, width, n_layers, w_prior=None, BMA_prior=False)
-        elif args.network == 'MLP':
-            model = arq_uncert_fc_MLP(input_dim, output_dim, width, n_layers, w_prior=None, BMA_prior=False)
-        else:
-            raise Exception('Bad network type. This should never raise as there is a previous assert.')
-
-        if args.prior_decay:
-            prior_probs = [(1 - args.prior_decay)**i for i in range(n_layers+1)]
-            norm_term = sum(prior_probs)
-            prior_probs = [p/norm_term for p in prior_probs]
-        else:
-            prior_probs = [1 / (n_layers + 1)] * (n_layers + 1)
-        
-        cprint('y', f'prior dist: {prior_probs}')
-        prob_model = depth_categorical_VI(prior_probs, cuda=cuda)
-        net = DUN_VI(model, prob_model, N_train, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None,
-                    regression=True, pred_sig=None, weight_decay=wd)
-
-
     # Active learning loop
     for i in range(args.n_queries):
-        
+
+        # Instantiate model
+        width = args.width
+        n_layers = args.N_layers
+        wd = args.wd
+        lr = args.lr
+
+        if args.inference == 'MFVI':
+            prior_sig = 1
+
+            model = MFVI_regression_homo(input_dim=input_dim, output_dim=output_dim,
+                                        width=width, n_layers=n_layers, prior_sig=1)
+
+            net = regression_baseline_net_VI(model, N_train, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None, seed=seed,
+                                            MC_samples=10, train_samples=5)
+
+        elif args.inference == 'Dropout':
+            model = dropout_regression_homo(input_dim=input_dim, output_dim=output_dim,
+                                            width=width, n_layers=n_layers, p_drop=0.1)
+
+            net = regression_baseline_net(model, N_train, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None, seed=seed,
+                                        MC_samples=10, weight_decay=wd)
+        elif args.inference == 'SGD':
+            model = SGD_regression_homo(input_dim=input_dim, output_dim=output_dim,
+                                        width=width, n_layers=n_layers)
+
+            net = regression_baseline_net(model, N_train, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None, seed=seed,
+                                        MC_samples=0, weight_decay=wd)
+        elif args.inference == 'DUN':
+
+            if args.network == 'ResNet':
+                model = arq_uncert_fc_resnet(input_dim, output_dim, width, n_layers, w_prior=None, BMA_prior=False)
+            elif args.network == 'MLP':
+                model = arq_uncert_fc_MLP(input_dim, output_dim, width, n_layers, w_prior=None, BMA_prior=False)
+            else:
+                raise Exception('Bad network type. This should never raise as there is a previous assert.')
+
+            if args.prior_decay:
+                prior_probs = [(1 - args.prior_decay)**i for i in range(n_layers+1)]
+                prior_probs = [p/sum(prior_probs) for p in prior_probs]
+            else:
+                prior_probs = [1 / (n_layers + 1)] * (n_layers + 1)
+            
+            print(f'prior dist: {prior_probs}')
+            prob_model = depth_categorical_VI(prior_probs, cuda=cuda)
+            net = DUN_VI(model, prob_model, N_train, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None,
+                        regression=True, pred_sig=None, weight_decay=wd)
+
         # Train model on labeled data
         labeled_idx = np.where(trainset.unlabeled_mask == 0)[0]
         labeledloader = torch.utils.data.DataLoader(
@@ -214,6 +217,15 @@ for j in range(n_runs):
         results_train[i,j] = min_train_error
         results[i,j] = min_val_error
 
+        # Acquire data
+        net.load(f'{basedir}/models/theta_best.dat')
+        acquire_samples(net, trainset, args.query_size, query_strategy=args.query_strategy)
+        n_labelled = int(sum(1 - trainset.unlabeled_mask))
+        current_labeled_idx = np.where(trainset.unlabeled_mask == 0)[0]
+        
+        acquired_data_idx = current_labeled_idx[~np.isin(current_labeled_idx, labeled_idx)] 
+        unlabeled_idx = np.concatenate([np.where(trainset.unlabeled_mask == 1)[0],acquired_data_idx])
+
         # Create plots
         media_dir = basedir + '/media'
         show_range = 5
@@ -231,28 +243,28 @@ for j in range(n_runs):
 
             # Layerwise predictive functions (separate images)
             for i in range(layer_preds.shape[0]):
-                plt.figure(dpi=80)
-                plt.scatter(X_train[trainset.unlabeled_mask.astype(bool)], y_train[trainset.unlabeled_mask.astype(bool)], s=3, alpha=0.2, c=c[0])
-                plt.scatter(X_train[~trainset.unlabeled_mask.astype(bool)], y_train[~trainset.unlabeled_mask.astype(bool)], s=5, alpha=0.7, c='k')
+                plt.figure(dpi=300)
+                plt.scatter(X_train[unlabeled_idx], y_train[unlabeled_idx], s=3, alpha=0.2, c=c[0])
+                plt.scatter(X_train[labeled_idx], y_train[labeled_idx], s=5, alpha=0.7, c='k')
                 _ = plt.plot(x_view[:, 0], layer_preds[i, :, 0].T, alpha=0.8, c='r')
                 plt.title(i)
                 plt.ylim([-ylim, ylim])
                 plt.xlim([-show_range, show_range])
                 plt.tight_layout()
-                plt.savefig(f'{media_dir}/{str(i)}_layerwise.png', format='png', bbox_inches='tight')
+                plt.savefig(f'{media_dir}/{str(i)}_layerwise.pdf', format='pdf', bbox_inches='tight')
                 plt.close()
 
             # Layerwise predictive functions (single image)
-            plt.figure(dpi=80)
-            plt.scatter(X_train[trainset.unlabeled_mask.astype(bool)], y_train[trainset.unlabeled_mask.astype(bool)], s=3, alpha=0.2, c=c[0])
-            plt.scatter(X_train[~trainset.unlabeled_mask.astype(bool)], y_train[~trainset.unlabeled_mask.astype(bool)], s=5, alpha=0.7, c='k')
+            plt.figure(dpi=300)
+            plt.scatter(X_train[unlabeled_idx], y_train[unlabeled_idx], s=3, alpha=0.2, c=c[0])
+            plt.scatter(X_train[labeled_idx], y_train[labeled_idx], s=5, alpha=0.7, c='k')
             for i in range(layer_preds.shape[0]):
                 plt.plot(x_view[:, 0], layer_preds[i, :, 0].T, alpha=0.8, c=c[i])
             plt.title('Layerwise predictive functions')
             plt.ylim([-ylim, ylim])
             plt.xlim([-show_range, show_range])
             plt.tight_layout()
-            plt.savefig(f'{media_dir}/layerwise.png', format='png', bbox_inches='tight')
+            plt.savefig(f'{media_dir}/layerwise.pdf', format='pdf', bbox_inches='tight')
             plt.close()
 
             # Layerwise predictions mean and std dev
@@ -261,62 +273,100 @@ for j in range(n_runs):
             pred_std = pred_std.data.cpu().numpy()
             noise_std = net.f_neg_loglike.log_std.exp().data.cpu().numpy()
 
-            plt.figure(dpi=80)
-            plt.scatter(X_train[trainset.unlabeled_mask.astype(bool)], y_train[trainset.unlabeled_mask.astype(bool)], s=3, alpha=0.2, c=c[0])
-            plt.scatter(X_train[~trainset.unlabeled_mask.astype(bool)], y_train[~trainset.unlabeled_mask.astype(bool)], s=5, alpha=0.7, c='k')
-            plt.plot(x_view, pred_mu, c=c[3])
-            plt.fill_between(x_view[:,0], 
-                             pred_mu[:,0] + (pred_std[:,0]**2 + noise_std**2)**0.5, 
-                             pred_mu[:,0] - (pred_std[:,0]**2 + noise_std**2)**0.5, 
-                             alpha=0.2, color=c[3])
-            plt.title('Mean predictive function')
-            plt.ylim([-ylim, ylim])
-            plt.xlim([-show_range, show_range])
-            plt.tight_layout()
-            plt.savefig(f'{media_dir}/mean_layerwise.png', format='png', bbox_inches='tight')
-            plt.close()
+            if args.query_strategy=='variance':
+                fig_handle = plt.figure(dpi=300)
+                fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+                ax1.scatter(X_train[unlabeled_idx], y_train[unlabeled_idx], s=3, alpha=0.2, c=c[0])
+                ax1.scatter(X_train[labeled_idx], y_train[labeled_idx], s=5, alpha=0.7, c='k')
+                ax1.plot(x_view, pred_mu, c=c[3])
+                ax1.fill_between(x_view[:,0], 
+                                pred_mu[:,0] + (pred_std[:,0]**2 + noise_std**2)**0.5, 
+                                pred_mu[:,0] - (pred_std[:,0]**2 + noise_std**2)**0.5, 
+                                alpha=0.2, color=c[3])
+                ax1.scatter(X_train[acquired_data_idx], y_train[acquired_data_idx], s=5, alpha=0.7, c=c[2])
+                ax1.set_title('Mean predictive function')
+                ax1.set_ylim([-ylim, ylim])
+                ax1.set_xlim([-show_range, show_range])
+                plt.tight_layout()
+
+                ax2.plot(x_view, pred_std, c='k')
+                ax2.set_title('Acquisition function')
+                ax2.set_xlim([-show_range, show_range])
+                plt.tight_layout()
+
+                fig.savefig(f'{media_dir}/mean_layerwise.pdf', format='pdf', bbox_inches='tight')
+                with open(f'{media_dir}/mean_layerwise.pickle', 'wb') as output_file:
+                    pl.dump(fig_handle, output_file)
+                plt.close()
+
+            else:
+                fig_handle = plt.figure(dpi=300)
+                plt.scatter(X_train[unlabeled_idx], y_train[unlabeled_idx], s=3, alpha=0.2, c=c[0])
+                plt.scatter(X_train[labeled_idx], y_train[labeled_idx], s=5, alpha=0.7, c='k')
+                plt.plot(x_view, pred_mu, c=c[3])
+                plt.fill_between(x_view[:,0], 
+                                pred_mu[:,0] + (pred_std[:,0]**2 + noise_std**2)**0.5, 
+                                pred_mu[:,0] - (pred_std[:,0]**2 + noise_std**2)**0.5, 
+                                alpha=0.2, color=c[3])
+                plt.scatter(X_train[acquired_data_idx], y_train[acquired_data_idx], s=5, alpha=0.7, c=c[2])
+                plt.title('Mean predictive function')
+                plt.ylim([-ylim, ylim])
+                plt.xlim([-show_range, show_range])
+                plt.tight_layout()
+                plt.savefig(f'{media_dir}/mean_layerwise.pdf', format='pdf', bbox_inches='tight')
+                with open(f'{media_dir}/mean_layerwise.pickle', 'wb') as output_file:
+                    pl.dump(fig_handle, output_file)
+                plt.close()
 
             # Posterior over depth
             x = np.array([i for i in range(layer_preds.shape[0])])
             height_true = true_d_posterior[-1,:]
             height_approx = approx_d_posterior[-1,:]
             
-            plt.figure(dpi=80)
+            fig_handle = plt.figure(dpi=300)
             plt.bar(x, height_true)
             plt.title('Posterior distribution over depth')
             plt.xlabel('Layer')
-            plt.savefig(f'{media_dir}/depth_post_true.png', format='png', bbox_inches='tight')
+            plt.savefig(f'{media_dir}/depth_post_true.pdf', format='pdf', bbox_inches='tight')
+            with open(f'{media_dir}/depth_post_true.pickle', 'wb') as output_file:
+                pl.dump(fig_handle, output_file)
             plt.close()
             
-            plt.figure(dpi=80)
+            fig_handle = plt.figure(dpi=300)
             plt.bar(x, height_approx)
             plt.title('Approximate posterior distribution over depth')
             plt.xlabel('Layer')
-            plt.savefig(f'{media_dir}/depth_post_approx.png', format='png', bbox_inches='tight')
+            plt.savefig(f'{media_dir}/depth_post_approx.pdf', format='pdf', bbox_inches='tight')
+            with open(f'{media_dir}/depth_post_approx.pickle', 'wb') as output_file:
+                pl.dump(fig_handle, output_file)
             plt.close()    
-
-        # Acquire data
-        acquire_samples(net, trainset, args.query_size)
-        n_labelled = int(sum(1 - trainset.unlabeled_mask))
 
 
     cprint('p', f'Train errors: {results_train[:,j]}')
     cprint('p', f'Val errors: {results[:,j]}\n')
+    np.savetxt(f'{args.savedir}/{name}/{j}/results_{j}.csv', results[:,j], delimiter=',')
 
     # plot validation error
-    plt.figure(dpi=200)
+    fig_handle = plt.figure(dpi=300)
     x = np.arange(args.init_train, args.init_train + args.n_queries*args.query_size, args.query_size)
     plt.plot(x, results[:,j])
     plt.xlabel('Train set size')
     plt.ylabel('Validation RMSE')
     plt.tight_layout()
-    plt.savefig(f'{args.savedir}/{name}/{j}/val_error.png', format='png', bbox_inches='tight')
+    plt.savefig(f'{args.savedir}/{name}/{j}/val_error.pdf', format='pdf', bbox_inches='tight')
+    with open(f'{args.savedir}/{name}/{j}/val_error.pickle', 'wb') as output_file:
+                pl.dump(fig_handle, output_file)
+    plt.close()
 
 means = results.mean(axis=1).reshape(-1,1)
 stds = results.std(axis = 1).reshape(-1,1)
 results = np.concatenate((means, stds, results), axis=1)
 np.savetxt(f'{args.savedir}/{name}/results.csv', results, delimiter=',')
-plot_al_rmse(f'{args.savedir}/{name}/rmse_plot', means.reshape(-1), stds.reshape(-1), args.n_queries, args.query_size, args.init_train)
+plot_al_rmse(f'{args.savedir}/{name}/rmse_plot', name, means.reshape(-1), stds.reshape(-1), args.n_queries, args.query_size, args.init_train)
+
+# plot mean posterior distributions
+if args.inference=='DUN':
+    plot_mean_d_posterior(f'{args.savedir}/{name}', n_runs, args.n_queries, args.init_train, args.query_size)
 
 toc = time()
 cprint('r', toc - tic)
