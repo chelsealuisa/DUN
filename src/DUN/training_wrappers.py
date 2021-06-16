@@ -79,6 +79,8 @@ class DUN(BaseNet):
                 depth=None, softmax=(not self.regression), get_std=True)
             mean_pred_negloglike = self.f_neg_loglike(means, y, model_std=model_stds).mean(dim=0).data
             err = rms(means, y).item()
+            return log_marginal_over_depth.data.item(), mean_pred_negloglike.item(), err, means - y
+
         else:
             probs = depth_categorical.marginalise_d_predict(act_vec.data, self.prob_model.current_posterior,
                                                             depth=None, softmax=(not self.regression))
@@ -86,7 +88,7 @@ class DUN(BaseNet):
             pred = probs.max(dim=1, keepdim=False)[1]  # get the index of the max probability
             err = pred.ne(y.data).sum().item() / y.shape[0]
 
-        return log_marginal_over_depth.data.item(), mean_pred_negloglike.item(), err
+            return log_marginal_over_depth.data.item(), mean_pred_negloglike.item(), err
 
     def eval(self, x, y):
         # TODO: make computationally stable with logsoftmax and nll loss -> would require making a log prediction method
