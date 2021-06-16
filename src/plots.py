@@ -1,10 +1,13 @@
+import os
 import numpy as np
 import torch
 import torch.nn.functional as F
 import matplotlib
 import matplotlib.pyplot as plt
+import fnmatch
+import pickle as pl
 
-from src.utils import np_get_one_hot, generate_ind_batch, rms
+from src.utils import np_get_one_hot, generate_ind_batch, rms, mkdir
 
 matplotlib.use('Agg')
 
@@ -373,41 +376,73 @@ def plot_calibration_curve(savefile, net, X_test, y_test, n_bins=10, dpi=200, sh
         plt.close(fig=None)
 
 
-def plot_al_rmse(savefile, means, stds, n_queries, query_size, init_train_size=10, dpi=200, show=False):
+def plot_al_rmse(savefile, title, means, stds, n_queries, query_size, init_train_size=10, dpi=300, show=False, ylog=False):
 
     plt.figure(dpi=dpi)
     x = np.arange(init_train_size, init_train_size + n_queries*query_size, query_size)
     plt.plot(x, means)
     plt.fill_between(x, means+stds, means-stds, alpha=0.3)
+    if ylog:
+        plt.yscale('log')
+        plt.ylabel('Mean validation RMSE (log)')
+    else:
+        plt.ylabel('Mean validation RMSE')
     plt.xlabel('Train set size')
-    plt.ylabel('Validation RMSE')
-    plt.title(savefile.split('/')[1])
+    plt.title(title)
 
     if savefile is not None:
-        plt.savefig(savefile + '.png', format='png', bbox_inches='tight')
+        plt.savefig(savefile + '.pdf', format='pdf', bbox_inches='tight')
     if show:
         plt.show()
     else:
         plt.close(fig=None)
 
 
-def plot_al_mean_rmse(savefile, dun, dropout, mfvi, sgd, dataset, 
-                      n_queries, query_size, dpi=200, show=False):
+def plot_al_mean_rmse(savefile, dun, dropout, mfvi, sgd, dataset,
+                      n_queries, query_size, init_train_size=10, dpi=300, show=False):
 
     plt.figure(dpi=dpi)
-    x = np.arange(query_size, (n_queries+1)*query_size, query_size)
+    x = np.arange(init_train_size, init_train_size + n_queries*query_size, query_size)
     plt.plot(x, dun, c='tab:blue', label='DUN')
     plt.plot(x, dropout, c='tab:red', label='Dropout')
     plt.plot(x, mfvi, c='tab:purple', label='MFVI')
     plt.plot(x, sgd, c='tab:orange', label='SGD')
-    plt.xlabel('Training points')
-    plt.ylabel('Mean validation RMSE')
+    plt.xlabel('Train set size')
+    plt.ylabel('Validation RMSE')
     plt.title(f'{dataset} dataset')
     plt.legend()
 
     if savefile is not None:
-        plt.savefig(savefile + '.png', format='png', bbox_inches='tight')
+        plt.savefig(savefile + '.pdf', format='pdf', bbox_inches='tight')
     if show:
         plt.show()
     else:
         plt.close(fig=None)
+
+
+def plot_mean_d_posterior(dir, n_runs, n_queries, init_train, query_size):
+
+    mkdir(f'{dir}/posterior_plots/')
+    
+    for dist in ['approx', 'true']:
+        for train_size in range(init_train, init_train+n_queries*query_size, query_size):
+            posteriors = []
+            for i in range(n_runs):
+                for file in os.listdir(f'{dir}/{i}/'):
+                    if fnmatch.fnmatch(file, f'{train_size}_*'):
+                        f_name = file
+                posteriors.append(np.genfromtxt(f'{dir}/{i}/{f_name}/media/{dist}_d_posterior.csv', delimiter=',')[-1,:])
+            posteriors = np.array(posteriors)
+            means = posteriors.mean(axis=0)
+            stds = posteriors.std(axis=0)
+            
+            x = np.array([i for i in range(means.shape[0])])
+            
+            fig_handle = plt.figure(dpi=300)
+            plt.bar(x, means, yerr=stds)
+            plt.title(f'{dist[0].capitalize()}{dist[1:]} posterior distribution over depth')
+            plt.xlabel('Layer')
+            plt.savefig(f'{dir}/posterior_plots/{train_size}_d_post_{dist}.pdf', format='pdf', bbox_inches='tight')
+            with open(f'{dir}/posterior_plots/{train_size}_depth_post_{dist}.pickle', 'wb') as output_file:
+                pl.dump(fig_handle, output_file)
+            plt.close()
