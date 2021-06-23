@@ -3,6 +3,8 @@ import torch
 from scipy import stats
 from src.utils import cprint
 
+from src.DUN.training_wrappers import DUN, DUN_VI
+
 def acquire_samples(model, dataset, query_size=10, query_strategy='random', 
                     batch_size=128, num_workers=4):
     
@@ -51,7 +53,6 @@ def max_entropy_query(dataloader, net, query_size=10, n_samples=1000, n_bins=10)
     indices = []
     
     d_posterior = net.prob_model.current_posterior.data.cpu().numpy()
-        
     with torch.no_grad():
         for x, y, idx in dataloader:
             layer_preds = net.layer_predict(x).data.cpu().numpy()    
@@ -76,12 +77,17 @@ def max_pred_var_query(dataloader, net, query_size=10):
     
     with torch.no_grad():
         for x, y, idx in dataloader:
-            pred_mu, pred_std = net.predict(x, get_std=True, return_model_std=True)
+            if isinstance(net, (DUN, DUN_VI)):           
+                pred_mu, pred_std = net.predict(x, get_std=True, return_model_std=True)
+            else:
+                pred_mu, pred_std = net.predict(x, Nsamples=100, return_model_std=True)        
             pred_std = pred_std.data.cpu().numpy()
             stds.extend(pred_std)
-            indices.extend(idx)        
+            indices.extend(idx)
     
     pred_stds = np.asarray(stds).reshape(1,-1)[0]
+    # clip varaince at 1
+    #pred_stds = np.where(pred_stds>1, 1, pred_stds)
     ind = np.asarray(indices)
     sorted_pool = np.argsort(pred_stds)[::-1]
 
