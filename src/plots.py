@@ -376,17 +376,23 @@ def plot_calibration_curve(savefile, net, X_test, y_test, n_bins=10, dpi=200, sh
         plt.close(fig=None)
 
 
-def plot_al_rmse(savefile, title, means, stds, n_queries, query_size, init_train_size=10, dpi=300, show=False, ylog=False):
+def plot_al_rmse(savefile, title, means, stds, n_queries, query_size, init_train_size=10, dpi=300, show=False, ylog=False, accuracy=False):
 
     plt.figure(dpi=dpi)
     x = np.arange(init_train_size, init_train_size + n_queries*query_size, query_size)
-    plt.plot(x, means)
-    plt.fill_between(x, means+stds, means-stds, alpha=0.3)
-    if ylog:
-        plt.yscale('log')
-        plt.ylabel('Mean validation RMSE (log)')
+    
+    if accuracy:
+        plt.plot(x, 1 - means)
+        plt.fill_between(x, (1-means)+stds, (1-means)-stds, alpha=0.3)
+        plt.ylabel('Mean validation accuracy')
     else:
-        plt.ylabel('Mean validation RMSE')
+        plt.plot(x, means)
+        plt.fill_between(x, means+stds, means-stds, alpha=0.3)
+        if ylog:
+            plt.yscale('log')
+            plt.ylabel('Mean validation RMSE (log)')
+        else:
+            plt.ylabel('Mean validation RMSE')
     plt.xlabel('Train set size')
     plt.title(title)
 
@@ -398,7 +404,7 @@ def plot_al_rmse(savefile, title, means, stds, n_queries, query_size, init_train
         plt.close(fig=None)
 
 
-def plot_al_mean_rmse(savefile, dun, dropout, mfvi, sgd, dataset,
+def plot_al_mean_rmse(savefile, dun, dropout, mfvi,  dataset,
                       n_queries, query_size, init_train_size=10, dpi=300, show=False):
 
     plt.figure(dpi=dpi)
@@ -406,7 +412,7 @@ def plot_al_mean_rmse(savefile, dun, dropout, mfvi, sgd, dataset,
     plt.plot(x, dun, c='tab:blue', label='DUN')
     plt.plot(x, dropout, c='tab:red', label='Dropout')
     plt.plot(x, mfvi, c='tab:purple', label='MFVI')
-    plt.plot(x, sgd, c='tab:orange', label='SGD')
+    #plt.plot(x, sgd, c='tab:orange', label='SGD')
     plt.xlabel('Train set size')
     plt.ylabel('Validation RMSE')
     plt.title(f'{dataset} dataset')
@@ -445,4 +451,4 @@ def plot_mean_d_posterior(dir, n_runs, n_queries, init_train, query_size):
             plt.savefig(f'{dir}/posterior_plots/{train_size}_d_post_{dist}.pdf', format='pdf', bbox_inches='tight')
             with open(f'{dir}/posterior_plots/{train_size}_depth_post_{dist}.pickle', 'wb') as output_file:
                 pl.dump(fig_handle, output_file)
-            plt.close()
+            plt.close(fig=None)
