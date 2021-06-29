@@ -68,9 +68,14 @@ parser.add_argument('--query_size', type=int,
                     default=10)
 parser.add_argument('--query_strategy', choices=['random','entropy', 'variance'], 
                     help='type of acquisition function (default: random)', default='random')
+parser.add_argument('--clip_var', type=bool, 
+                    help='clip variance at 1 for variance acquisition (default: False)', default=False)
 parser.add_argument('--init_train', type=int, 
                     help='number of labelled observations in initial train set (default: 10)',
                     default=10)
+parser.add_argument('--prior_decay', type=float, 
+                    help='rate of decay for non-uniform prior distribution (default: None)',
+                    default=None)
 
 args = parser.parse_args()
 
@@ -85,8 +90,13 @@ name = '_'.join([args.inference, args.dataset, str(args.N_layers), str(args.widt
                  str(args.overcount), str(args.init_train)])
 if args.network == 'MLP':
     name += '_MLP'
+if args.prior_decay:
+    name += f'_{args.prior_decay}'
 if args.query_strategy != 'random':
     name += f'_{args.query_strategy}'
+if args.clip_var:
+    name += '_clip'
+name += '_ntrain'
 
 cuda = (args.gpu is not None)
 if cuda:
@@ -109,7 +119,6 @@ elif args.dataset in uci_names + uci_gap_names:
 
 testset = Datafeed(torch.Tensor(X_test), torch.Tensor(y_test), transform=None)
 
-N_train = X_train.shape[0]
 input_dim = X_train.shape[1]
 output_dim = y_train.shape[1]
 
@@ -130,7 +139,7 @@ for j in range(n_runs):
     mkdir(f'{args.savedir}/{name}/{j}')
 
     # Reset train data
-    trainset = DatafeedIndexed(torch.Tensor(X_train), torch.Tensor(y_train), args.init_train, transform=None)
+    trainset = DatafeedIndexed(torch.Tensor(X_train), torch.Tensor(y_train), args.init_train, seed=j, transform=None)
     n_labelled = int(sum(1 - trainset.unlabeled_mask))
 
     # Active learning loop
@@ -148,20 +157,20 @@ for j in range(n_runs):
             model = MFVI_regression_homo(input_dim=input_dim, output_dim=output_dim,
                                         width=width, n_layers=n_layers, prior_sig=1)
 
-            net = regression_baseline_net_VI(model, N_train, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None, seed=None,
+            net = regression_baseline_net_VI(model, n_labelled, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None, seed=None,
                                             MC_samples=10, train_samples=5)
 
         elif args.inference == 'Dropout':
             model = dropout_regression_homo(input_dim=input_dim, output_dim=output_dim,
                                             width=width, n_layers=n_layers, p_drop=0.1)
 
-            net = regression_baseline_net(model, N_train, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None, seed=None,
+            net = regression_baseline_net(model, n_labelled, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None, seed=None,
                                         MC_samples=10, weight_decay=wd)
         elif args.inference == 'SGD':
             model = SGD_regression_homo(input_dim=input_dim, output_dim=output_dim,
                                         width=width, n_layers=n_layers)
 
-            net = regression_baseline_net(model, N_train, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None, seed=None,
+            net = regression_baseline_net(model, n_labelled, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None, seed=None,
                                         MC_samples=0, weight_decay=wd)
         elif args.inference == 'DUN':
 
@@ -172,9 +181,14 @@ for j in range(n_runs):
             else:
                 raise Exception('Bad network type. This should never raise as there is a previous assert.')
 
-            prior_probs = [1 / (n_layers + 1)] * (n_layers + 1)
+            if args.prior_decay:
+                prior_probs = [(1 - args.prior_decay)**i for i in range(n_layers+1)]
+                prior_probs = [p/sum(prior_probs) for p in prior_probs]
+            else:
+                prior_probs = [1 / (n_layers + 1)] * (n_layers + 1)
+            print(f'prior dist: {prior_probs}')
             prob_model = depth_categorical_VI(prior_probs, cuda=cuda)
-            net = DUN_VI(model, prob_model, N_train, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None,
+            net = DUN_VI(model, prob_model, n_labelled, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None,
                         regression=True, pred_sig=None, weight_decay=wd)
         
         # Train model on labeled data
@@ -213,7 +227,7 @@ for j in range(n_runs):
         
         # Acquire data
         net.load(f'{basedir}/models/theta_best.dat')
-        acquire_samples(net, trainset, args.query_size, query_strategy=args.query_strategy)
+        acquire_samples(net, trainset, args.query_size, query_strategy=args.query_strategy, clip_var=args.clip_var)
         n_labelled = int(sum(1 - trainset.unlabeled_mask))
         
         if args.inference == 'DUN':
