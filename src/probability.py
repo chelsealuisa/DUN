@@ -5,7 +5,7 @@ from torch.distributions import Normal
 import numpy as np
 from scipy.special import gamma
 
-from src.utils import torch_onehot
+from src.utils import torch_onehot, cprint
 
 
 def gumbel_softmax(log_prob_map, temperature, eps=1e-20):
@@ -250,6 +250,9 @@ class depth_categorical_VI(depth_categorical):
         # print('Elbo joint loglike per depth', joint_loglike_per_depth)
         E_loglike = self.get_E_loglike(joint_loglike_per_depth)
         KL = self.get_KL()
+
+        cprint('g', f'loglike: {E_loglike}')
+        cprint('g', f'Beta * KL: {Beta * KL}')
         return E_loglike - Beta * KL
 
     def q_predict(self, act_vec, depth=None, softmax=False):
