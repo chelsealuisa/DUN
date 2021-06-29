@@ -1,12 +1,14 @@
 import numpy as np
+from numpy.lib.arraysetops import isin
 import torch
+from torch.nn import functional as F
 from scipy import stats
 from src.utils import cprint
 
 from src.DUN.training_wrappers import DUN, DUN_VI
 
 def acquire_samples(model, dataset, query_size=10, query_strategy='random', 
-                    batch_size=128, num_workers=4):
+                    batch_size=2048, num_workers=4, clip_var=False):
     
     unlabeled_idx = np.nonzero(dataset.unlabeled_mask)[0]
     
@@ -19,7 +21,7 @@ def acquire_samples(model, dataset, query_size=10, query_strategy='random',
     elif query_strategy=='entropy':
         sample_idx = max_entropy_query(poolloader, model, query_size=query_size)
     elif query_strategy=='variance':
-        sample_idx = max_pred_var_query(poolloader, model, query_size)
+        sample_idx = max_pred_var_query(poolloader, model, query_size, clip_var)
     else:
         raise Exception(f'{query_strategy} acquisition function not supported.')
     
@@ -48,20 +50,47 @@ def random_query(dataloader, query_size=10):
 
 
 def max_entropy_query(dataloader, net, query_size=10, n_samples=1000, n_bins=10):
-    '''Query points with max entropy. Entropy approximated via histogram of sampled predictions.'''    
+    '''Query points with max entropy. For regression, entropy approximated via histogram of sampled predictions.'''    
     entropies = []
     indices = []
     
-    d_posterior = net.prob_model.current_posterior.data.cpu().numpy()
-    with torch.no_grad():
-        for x, y, idx in dataloader:
-            layer_preds = net.layer_predict(x).data.cpu().numpy()    
-            for j in range(layer_preds.shape[1]):
-                preds = layer_preds[:,j].reshape(-1)
-                samples = np.random.choice(preds, size=n_samples, replace=True, p=d_posterior)
-                hist, _ = np.histogram(samples, bins=n_bins)
-                entropies.append(stats.entropy(hist))
-                indices.append(idx[j])
+    if net.regression:
+        if isinstance(net, (DUN, DUN_VI)): 
+            d_posterior = net.prob_model.current_posterior.data.cpu().numpy()
+            with torch.no_grad():
+                for x, y, idx in dataloader:
+                    layer_preds = net.layer_predict(x).data.cpu().numpy()
+                    for j in range(layer_preds.shape[1]):
+                        preds = layer_preds[:,j].reshape(-1)
+                        samples = np.random.choice(preds, size=n_samples, replace=True, p=d_posterior)
+                        hist, _ = np.histogram(samples, bins=n_bins)
+                        entropies.append(stats.entropy(hist))
+                        indices.append(idx[j])
+        else:
+            with torch.no_grad():
+                samples = []
+                hists = []
+                for x, y, idx in dataloader:
+                    for _ in range(n_samples):
+                        x1 = net.model.layers(x)
+                        samples.append(x1.data)
+                samples = torch.stack(samples, dim=0)
+                samples = samples.squeeze(2)
+                for j in range(samples.shape[1]):
+                    hist, _ = np.histogram(samples[:,j], bins=n_bins)
+                    hists.append(hist)
+                hists = np.array(hists)
+                entropies.extend(stats.entropy(hist, axis=1))
+                indices.extend(idx)
+    else:
+        with torch.no_grad():
+            for x, y, idx in dataloader:
+                if isinstance(net, (DUN, DUN_VI)): 
+                    preds = net.predict(x).data.cpu().numpy()
+                else:
+                    preds = net.predict(x, Nsamples=100, return_model_std=False)
+                entropies.extend(stats.entropy(preds, axis=1))
+                indices.extend(idx)
 
     ent = np.asarray(entropies)
     ind = np.asarray(indices)
@@ -70,24 +99,62 @@ def max_entropy_query(dataloader, net, query_size=10, n_samples=1000, n_bins=10)
     return ind[sorted_pool][0:query_size]
 
 
-def max_pred_var_query(dataloader, net, query_size=10):
-    '''Query points with max model predictive variance (return_model_std=True).'''    
+def max_pred_var_query(dataloader, net, query_size=10, clip_var=False, n_samples=50):
+    '''
+    Query points with max model predictive variance (return_model_std=True).
+    Equivalent to BALD acquisition.
+    '''    
     stds = []
     indices = []
     
     with torch.no_grad():
-        for x, y, idx in dataloader:
-            if isinstance(net, (DUN, DUN_VI)):           
-                pred_mu, pred_std = net.predict(x, get_std=True, return_model_std=True)
+        if net.regression:
+            for x, y, idx in dataloader:
+                if isinstance(net, (DUN, DUN_VI)):           
+                    pred_mu, pred_std = net.predict(x, get_std=True, return_model_std=True)
+                else:
+                    pred_mu, pred_std = net.predict(x, Nsamples=100, return_model_std=True)        
+                pred_std = pred_std.data.cpu().numpy()
+                stds.extend(pred_std)
+                indices.extend(idx)
+        else:
+            if isinstance(net, (DUN, DUN_VI)):
+                d_posterior = net.prob_model.current_posterior.data.cpu().numpy()
+                for x, y, idx in dataloader:
+                    marg_preds = net.predict(x, get_std=False, return_model_std=False).data.cpu().numpy() # shape = (pool size, no. classes)
+                    layer_preds = net.layer_predict(x).data.cpu().numpy() # shape = (depth, pool size, no. classes)
+                    # BALD approx
+                    model_var = stats.entropy(marg_preds, axis=1) # 1st term in BALD
+                    per_d_entropy = stats.entropy(layer_preds, axis=2)
+                    noise = (d_posterior*np.transpose(per_d_entropy)).sum(axis=1) # 2nd term in BALD
+                    bald = model_var - noise
+                    stds.extend(bald)
+                    indices.extend(idx)
             else:
-                pred_mu, pred_std = net.predict(x, Nsamples=100, return_model_std=True)        
-            pred_std = pred_std.data.cpu().numpy()
-            stds.extend(pred_std)
-            indices.extend(idx)
-    
+                with torch.no_grad():
+                    samples = []
+                    for x, y, idx in dataloader:
+                        for _ in range(n_samples):
+                            x1 = net.model.layers(x)
+                            samples.append(x1.data)
+                    samples = torch.stack(samples, dim=0)
+                    # BALD approx
+                    probs = F.softmax(samples, dim=2)
+                    mean_probs = torch.sum(probs, dim=0) / probs.shape[0]
+                    model_var = stats.entropy(mean_probs, axis=1) # 1st term in BALD
+                    noise = np.zeros(probs.shape[1])
+                    for i in range(probs.shape[1]):
+                        probs_np = probs[:,i,:].numpy()
+                        noise[i] = -np.sum(probs_np*np.log(probs_np))
+                    noise = noise / probs.shape[0] # 2nd term in BALD
+                    bald = model_var - noise
+                    stds.extend(bald)
+                    indices.extend(idx)
+                    
     pred_stds = np.asarray(stds).reshape(1,-1)[0]
-    # clip varaince at 1
-    #pred_stds = np.where(pred_stds>1, 1, pred_stds)
+    if clip_var:
+        # clip the variances at 1
+        pred_stds = np.where(pred_stds>1, 1, pred_stds)
     ind = np.asarray(indices)
     sorted_pool = np.argsort(pred_stds)[::-1]
 
