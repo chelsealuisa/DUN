@@ -70,12 +70,15 @@ def train_fc_DUN(net, name, save_dir, batch_size, nb_epochs, train_loader, val_l
         nb_samples = 0
         xs = []
         ys = []
-        errs = []
+        #errs = []
         for x, y, *_ in train_loader:
             if flat_ims:
                 x = x.view(x.shape[0], -1)
 
-            marg_loglike_estimate, minus_loglike, err, example_errors = net.fit(x, y)
+            if net.regression:
+                marg_loglike_estimate, minus_loglike, err = net.fit(x, y)
+            else:
+                marg_loglike_estimate, minus_loglike, err = net.fit(x, y.squeeze(1))
 
             marginal_loglike_estimate[i] += marg_loglike_estimate * x.shape[0]
             err_train[i] += err * x.shape[0]
@@ -85,7 +88,7 @@ def train_fc_DUN(net, name, save_dir, batch_size, nb_epochs, train_loader, val_l
             if x.shape[1]==1:
                 xs.extend(x.cpu().detach().numpy().reshape(-1))
             ys.extend(y.cpu().detach().numpy().reshape(-1))
-            errs.extend(example_errors.cpu().detach().numpy().reshape(-1))
+            #errs.extend(example_errors.cpu().detach().numpy().reshape(-1))
 
         marginal_loglike_estimate[i] /= nb_samples
         train_mean_predictive_loglike[i] /= nb_samples
@@ -93,6 +96,7 @@ def train_fc_DUN(net, name, save_dir, batch_size, nb_epochs, train_loader, val_l
 
         toc = time.time()
         
+        '''
         if basedir_prefix:
             if x.shape[1]==1:
                 per_example_errors[i*3:(i*3+3),0] = str(i)
@@ -103,12 +107,12 @@ def train_fc_DUN(net, name, save_dir, batch_size, nb_epochs, train_loader, val_l
                 per_example_errors[i*2:(i*2+2),0] = str(i)
                 per_example_errors[i*2,1:] = np.array(ys)
                 per_example_errors[i*2+1,1:] = np.array(errs)
-
+        '''
         # ---- print
         print('\n depth approx posterior', net.prob_model.current_posterior.data.cpu().numpy())
         print("it %d/%d, ELBO/evidence %.4f, pred minus loglike = %f, err = %f" %
               (i, nb_epochs, marginal_loglike_estimate[i], train_mean_predictive_loglike[i], err_train[i]), end="")
-        print(f'\n max error: {max(abs(example_errors)).item()}')
+        #print(f'\n max error: {max(abs(example_errors)).item()}')
 
         cprint('r', '   time: %f seconds\n' % (toc - tic))
         net.update_lr()
