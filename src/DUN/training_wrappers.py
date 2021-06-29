@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
 
-from src.utils import BaseNet, cprint, to_variable
+from src.utils import BaseNet, DatafeedIndexed, cprint, to_variable
 from src.utils import rms
 from src.probability import homo_Gauss_mloglike, depth_categorical
 
@@ -179,7 +179,10 @@ class DUN(BaseNet):
         with torch.no_grad():
             prior_loglikes = self.model.get_w_prior_loglike(k=None)
 
-            N_train = len(trainloader.dataset)
+            if isinstance(trainloader.dataset, DatafeedIndexed):
+                N_train = len(trainloader.sampler)
+            else:
+                N_train = len(trainloader.dataset)
             assert N_train == self.N_train
             cum_joint_loglike_per_depth = []
 
@@ -187,6 +190,7 @@ class DUN(BaseNet):
                 x, y = to_variable(var=(x, y), cuda=self.cuda)
                 if not self.regression:
                     y = y.long()
+                    y = y.squeeze(1)
                 act_vec = self.model.forward(x)
 
                 joint_loglike_per_depth = self.prob_model.get_w_joint_loglike(prior_loglikes, act_vec,
@@ -237,7 +241,7 @@ class DUN_VI(DUN):
             mean_pred_negloglike = self.f_neg_loglike(means, y, model_std=model_stds).mean(dim=0).data
             err = rms(means, y).item()
 
-            return ELBO.data.item(), mean_pred_negloglike.item(), err, means - y
+            return ELBO.data.item(), mean_pred_negloglike.item(), err
 
         else:
             probs = depth_categorical.marginalise_d_predict(act_vec.data, self.prob_model.current_posterior,
@@ -258,7 +262,10 @@ class DUN_VI(DUN):
 
             prior_loglikes = self.model.get_w_prior_loglike(k=None)
 
-            N_train = len(trainloader.dataset)
+            if isinstance(trainloader.dataset, DatafeedIndexed):
+                N_train = len(trainloader.sampler)
+            else:
+                N_train = len(trainloader.dataset)
             assert N_train == self.N_train
             cum_ELBO = []
 
