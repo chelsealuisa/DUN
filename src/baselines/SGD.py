@@ -1,6 +1,7 @@
 import random
 import numpy as np
 import torch
+import torch.nn.functional as F
 import torch.nn as nn
 
 
@@ -43,10 +44,13 @@ class SGD_regression_homo(nn.Module):
         mean = self.layers(x)
         return mean # , self.log_std.exp()
 
-    def forward_predict(self, x, Nsamples=0):
+    def forward_predict(self, x, Nsamples=0, softmax=False):
         """This function is different from forward to compactly represent eval functions"""
         mu = self.forward(x)
-        return mu, torch.ones_like(mu) * 0 # TODO: torch.zeros_like?
+        if not softmax:
+            return mu, torch.ones_like(mu) * 0 # TODO: torch.zeros_like?
+        else:
+            return F.softmax(mu, dim=1)
 
     def get_regulariser(self):
         """MC dropout uses weight decay to approximate the KL divergence"""

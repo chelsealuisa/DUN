@@ -3,6 +3,8 @@ import torch.nn.functional as F
 import torch.nn as nn
 from torch.autograd import Variable
 
+from src.utils import cprint
+import sys
 
 def KLD_cost(mu_p, sig_p, mu_q, sig_q):
     KLD = 0.5 * (2 * torch.log(sig_p / sig_q) - 1 + (sig_q / sig_p).pow(2) + ((mu_p - mu_q) / sig_p).pow(2)).sum()
@@ -110,20 +112,25 @@ class MFVI_regression_homo(nn.Module):
         pred_vec = torch.stack(pred_vec, dim=0)
         return pred_vec  # , self.log_std.exp()
 
-    def forward_predict(self, x, Nsamples=3):
+    def forward_predict(self, x, Nsamples=3, softmax=False):
         """This function is different from forward to compactly represent eval functions"""
         mu_vec = []
         for i in range(Nsamples):
             x1 = self.layers(x)
             mu_vec.append(x1.data)
         mu_vec = torch.stack(mu_vec, dim=0)
-        model_std = mu_vec.std(dim=0)
         
-        # total_std = (self.log_std.exp()**2 + model_var).pow(0.5)
-        mean = mu_vec.mean(dim=0)
-        if Nsamples == 0:
-            model_std = torch.zeros_like(mean)
-        return mean, model_std
+        if not softmax:
+            model_std = mu_vec.std(dim=0)
+            # total_std = (self.log_std.exp()**2 + model_var).pow(0.5)
+            mean = mu_vec.mean(dim=0)
+            if Nsamples == 0:
+                model_std = torch.zeros_like(mean)
+            return mean, model_std
+        else:
+            probs = F.softmax(mu_vec, dim=2)
+            mean_probs = torch.sum(probs, dim=0) / probs.shape[0]
+            return mean_probs
 
     def get_KL(self):
         KL = 0

@@ -55,7 +55,10 @@ def train_fc_baseline(net, name, save_dir, batch_size, nb_epochs, trainloader, v
             if flat_ims:
                 x = x.view(x.shape[0], -1)
 
-            marg_loglike_estimate, minus_loglike, err = net.fit(x, y)
+            if net.regression:
+                marg_loglike_estimate, minus_loglike, err = net.fit(x, y)
+            else:
+                marg_loglike_estimate, minus_loglike, err = net.fit(x, y.squeeze(1))
 
             marginal_loglike_estimate[i] += marg_loglike_estimate * x.shape[0]
             err_train[i] += err * x.shape[0]
