@@ -123,7 +123,7 @@ class BaseNet(object):
             self.scheduler.step()
 
     def save(self, filename, best_err=None):
-        cprint('c', 'Writting %s\n' % filename)
+        cprint('c', 'Writing %s\n' % filename)
         if best_err is None:
             try:
                 torch.save({
@@ -222,13 +222,13 @@ class Datafeed(data.Dataset):
 
 class DatafeedIndexed(data.Dataset):
 
-    def __init__(self, x_train, y_train, train_size, transform=None):
+    def __init__(self, x_train, y_train, train_size, seed=0, transform=None):
         self.data = x_train
         self.labels = y_train
         self.transform = transform
         self.targets = torch.Tensor([0]*x_train.shape[0]).reshape(-1, 1)
         
-        np.random.seed(0)
+        np.random.seed(seed)
         unlabeled_mask = np.ones(x_train.shape[0])
         unlabeled_mask[:train_size] = 0
         np.random.shuffle(unlabeled_mask)
