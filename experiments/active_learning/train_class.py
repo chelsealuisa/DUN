@@ -8,7 +8,6 @@ import numpy as np
 import pickle as pl
 import torch
 from sklearn.model_selection import train_test_split
-import matplotlib.pyplot as plt
 
 from src.utils import Datafeed, DatafeedIndexed, cprint, mkdir
 from src.datasets.spirals_loader import make_spirals
@@ -150,20 +149,20 @@ for j in range(n_runs):
             model = MFVI_regression_homo(input_dim=input_dim, output_dim=output_dim,
                                         width=width, n_layers=n_layers, prior_sig=1)
 
-            net = regression_baseline_net_VI(model, n_labelled, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None, seed=None,
+            net = regression_baseline_net_VI(model, n_labelled, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None, seed=seed,
                                             MC_samples=10, train_samples=5, regression=False)
 
         elif args.inference == 'Dropout':
             model = dropout_regression_homo(input_dim=input_dim, output_dim=output_dim,
                                             width=width, n_layers=n_layers, p_drop=0.1)
 
-            net = regression_baseline_net(model, n_labelled, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None, seed=None,
+            net = regression_baseline_net(model, n_labelled, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None, seed=seed,
                                         MC_samples=10, weight_decay=wd, regression=False)
         elif args.inference == 'SGD':
             model = SGD_regression_homo(input_dim=input_dim, output_dim=output_dim,
                                         width=width, n_layers=n_layers)
 
-            net = regression_baseline_net(model, n_labelled, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None, seed=None,
+            net = regression_baseline_net(model, n_labelled, lr=args.lr, momentum=momentum, cuda=cuda, schedule=None, seed=seed,
                                         MC_samples=0, weight_decay=wd, regression=False)
         elif args.inference == 'DUN':
 
