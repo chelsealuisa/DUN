@@ -4,8 +4,9 @@ import torch
 from torch.nn import functional as F
 from scipy import stats
 from src.utils import cprint
-
 from src.DUN.training_wrappers import DUN, DUN_VI
+
+import sys
 
 def acquire_samples(model, dataset, query_size=10, query_strategy='random', 
                     batch_size=2048, num_workers=4, clip_var=False):
@@ -70,18 +71,20 @@ def max_entropy_query(dataloader, net, query_size=10, n_samples=1000, n_bins=10)
             with torch.no_grad():
                 samples = []
                 hists = []
-                for x, y, idx in dataloader:
+                for x, _, idx in dataloader:
+                    indices.extend(idx)
+                    batch_samples = []
                     for _ in range(n_samples):
                         x1 = net.model.layers(x)
-                        samples.append(x1.data)
-                samples = torch.stack(samples, dim=0)
-                samples = samples.squeeze(2)
+                        batch_samples.append(x1.data)
+                    batch_samples = torch.stack(batch_samples, dim=0).squeeze(2)
+                    samples.append(batch_samples)
+                samples = torch.cat(samples, dim=1)
                 for j in range(samples.shape[1]):
                     hist, _ = np.histogram(samples[:,j], bins=n_bins)
                     hists.append(hist)
                 hists = np.array(hists)
-                entropies.extend(stats.entropy(hist, axis=1))
-                indices.extend(idx)
+                entropies.extend(stats.entropy(hists, axis=1))
     else:
         with torch.no_grad():
             for x, y, idx in dataloader:
@@ -111,9 +114,9 @@ def max_pred_var_query(dataloader, net, query_size=10, clip_var=False, n_samples
         if net.regression:
             for x, y, idx in dataloader:
                 if isinstance(net, (DUN, DUN_VI)):           
-                    pred_mu, pred_std = net.predict(x, get_std=True, return_model_std=True)
+                    _, pred_std = net.predict(x, get_std=True, return_model_std=True)
                 else:
-                    pred_mu, pred_std = net.predict(x, Nsamples=100, return_model_std=True)        
+                    _, pred_std = net.predict(x, Nsamples=100, return_model_std=True)        
                 pred_std = pred_std.data.cpu().numpy()
                 stds.extend(pred_std)
                 indices.extend(idx)
@@ -134,10 +137,14 @@ def max_pred_var_query(dataloader, net, query_size=10, clip_var=False, n_samples
                 with torch.no_grad():
                     samples = []
                     for x, y, idx in dataloader:
+                        indices.extend(idx)
+                        batch_samples = []
                         for _ in range(n_samples):
                             x1 = net.model.layers(x)
-                            samples.append(x1.data)
-                    samples = torch.stack(samples, dim=0)
+                            batch_samples.append(x1.data)
+                        batch_samples = torch.stack(batch_samples, dim=0)#.squeeze(2)
+                        samples.append(batch_samples)
+                    samples = torch.cat(samples, dim=1)
                     # BALD approx
                     probs = F.softmax(samples, dim=2)
                     mean_probs = torch.sum(probs, dim=0) / probs.shape[0]
@@ -149,7 +156,6 @@ def max_pred_var_query(dataloader, net, query_size=10, clip_var=False, n_samples
                     noise = noise / probs.shape[0] # 2nd term in BALD
                     bald = model_var - noise
                     stds.extend(bald)
-                    indices.extend(idx)
                     
     pred_stds = np.asarray(stds).reshape(1,-1)[0]
     if clip_var:
