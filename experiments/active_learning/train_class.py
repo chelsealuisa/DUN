@@ -70,6 +70,12 @@ parser.add_argument('--query_strategy', choices=['random','entropy', 'variance']
 parser.add_argument('--init_train', type=int, 
                     help='number of labelled observations in initial train set (default: 10)',
                     default=10)
+parser.add_argument('--prior_decay', type=float, 
+                    help='rate of decay for non-uniform prior distribution (default: None)',
+                    default=None)
+parser.add_argument('--bias_weights', type=bool, 
+                    help='use active learning bias reduction weights in loss function (default: False)',
+                    default=False)
 
 args = parser.parse_args()
 
@@ -84,8 +90,12 @@ name = '_'.join([args.inference, args.dataset, str(args.data_size), str(args.n_a
                  str(args.width), str(args.lr), str(args.wd), str(args.overcount), str(args.init_train)])
 if args.network == 'MLP':
     name += '_MLP'
+if args.prior_decay:
+    name += f'_{args.prior_decay}'
 if args.query_strategy != 'random':
     name += f'_{args.query_strategy}'
+if args.bias_weights:
+    name += '_biasw'
 name += '_ntrain'
 
 cuda = (args.gpu is not None)
@@ -97,7 +107,7 @@ print('cuda', cuda)
 # Create datasets
 if args.dataset == "spirals":
     X_train, y_train = make_spirals(n_samples=args.data_size, shuffle=True, noise=0.2, random_state=42,\
-                                    n_arms=args.n_arms, start_angle=0, stop_angle=720)
+                                    n_arms=args.n_arms, start_angle=0, stop_angle=360)
 
 X_train, X_test, y_train, y_test = train_test_split(X_train, y_train, test_size=0.20, random_state=42)
 
@@ -191,18 +201,21 @@ for j in range(n_runs):
                 approx_d_posterior, true_d_posterior, true_likelihood, exact_ELBO, basedir = \
                 train_fc_baseline(net, f'{name}/{j}', args.savedir, batch_size, epochs, labeledloader, valloader, cuda=cuda,
                             flat_ims=False, nb_its_dev=nb_its_dev, early_stop=None, track_posterior=False, 
-                            track_exact_ELBO=False, seed=seed, save_freq=nb_its_dev, basedir_prefix=n_labelled)
+                            track_exact_ELBO=False, seed=seed, save_freq=nb_its_dev, basedir_prefix=n_labelled,
+                            bias_reduction_weights=args.bias_weights, dataset=trainset)
         else:
             marginal_loglike_estimate, train_mean_predictive_loglike, dev_mean_predictive_loglike, err_train, err_dev, \
                 approx_d_posterior, true_d_posterior, true_likelihood, exact_ELBO, basedir = \
                 train_fc_DUN(net, f'{name}/{j}', args.savedir, batch_size, epochs, labeledloader, valloader,
                         cuda, seed=seed, flat_ims=False, nb_its_dev=nb_its_dev, early_stop=None,
                         track_posterior=True, track_exact_ELBO=False, tags=None,
-                        load_path=None, save_freq=nb_its_dev, basedir_prefix=n_labelled)
+                        load_path=None, save_freq=nb_its_dev, basedir_prefix=n_labelled,
+                        bias_reduction_weights=args.bias_weights, dataset=trainset)
 
         # Record performance
-        min_train_error = min([err for err in err_train if err>0])
-        min_val_error = min([err for err in err_dev if err>0])
+        min_train_error = min([err for err in err_train if err>=0])
+        err_dev = err_dev[::nb_its_dev] # keep epochs for which val error evaluated 
+        min_val_error = min([err for err in err_dev if err>=0])
         results_train[i,j] = min_train_error
         results[i,j] = min_val_error
 
