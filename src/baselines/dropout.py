@@ -52,8 +52,6 @@ class dropout_regression_homo(nn.Module):
 
     def forward_predict(self, x, Nsamples=3, softmax=False):
         """This function is different from forward to compactly represent eval functions"""
-        
-        cprint('p', x.shape)
         mu_vec = []
         for _ in range(Nsamples):
             x1 = self.layers(x)
@@ -68,7 +66,7 @@ class dropout_regression_homo(nn.Module):
                 model_std = torch.zeros_like(mean)
             return mean, model_std
         else:
-            probs = F.softmax(mu_vec, dim=2) # TODO: check dimension
+            probs = F.softmax(mu_vec, dim=2) 
             mean_probs = torch.sum(probs, dim=0) / probs.shape[0]
             return mean_probs
 
