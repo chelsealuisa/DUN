@@ -227,14 +227,18 @@ class DatafeedIndexed(data.Dataset):
         self.labels = y_train
         self.transform = transform
         self.targets = torch.Tensor([0]*x_train.shape[0]).reshape(-1, 1)
-        
+        self.q_scores = np.zeros(x_train.shape[0])
+        self.m = np.zeros(x_train.shape[0]) # index tracking order of acquisition
+        self.N = x_train.shape[0] # pool size
+        self.M = 0 # tain set size
+
         np.random.seed(seed)
         unlabeled_mask = np.ones(x_train.shape[0])
         unlabeled_mask[:train_size] = 0
         np.random.shuffle(unlabeled_mask)
         self.unlabeled_mask = unlabeled_mask
         labeled_idx = np.where(self.unlabeled_mask == 0)[0]
-        for i in labeled_idx:
+        for i in labeled_idx: 
             self.update_label(i)
 
     def __getitem__(self, index):
@@ -249,9 +253,21 @@ class DatafeedIndexed(data.Dataset):
     def __len__(self):
         return len(self.data)
 
-    def update_label(self, index):
+    def update_label(self, index, q_score=None):
         self.targets[index] = self.labels[index]
         self.unlabeled_mask[index] = 0
+        self.M += 1
+        self.m[index] = self.M
+        if q_score:
+            self.q_scores[index] = q_score
+        else: # if no q_score, assume random (uniform) acquisition
+            self.q_scores[index] = 1 / (self.N - self.M + 1)
+
+    def get_rlure_weights(self, idx):
+        weights = []
+        for i in idx:
+            weights.append(1 + (self.N - self.M)/(self.N - self.m[i]) * (1/((self.N - self.m[i] + 1)*self.q_scores[i]) - 1))
+        return torch.Tensor(weights)
 
 
 def torch_onehot(y, Nclass):

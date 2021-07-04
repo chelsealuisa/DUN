@@ -159,7 +159,7 @@ class depth_categorical(nn.Module):
         self.logprior = self.logprior.cuda()
 
     @staticmethod
-    def get_w_joint_loglike(prior_loglikes, act_vec, y, f_neg_loglike, N_train):
+    def get_w_joint_loglike(prior_loglikes, act_vec, y, f_neg_loglike, N_train, idx=None, dataset=None):
         """Note that if we average this to get exact joint, then all batches need to be the same size.
         Alternatively you can weigh each component with its batch size."""
         batch_size = act_vec.shape[1]
@@ -169,8 +169,13 @@ class depth_categorical(nn.Module):
         y_expand = y.repeat(*repeat_dims)  # targets are same across acts -> interleave
         act_vec_flat = act_vec.view(depth*batch_size, -1)  # flattening results in batch_n changing first
         loglike_per_act = -f_neg_loglike(act_vec_flat, y_expand).view(depth, batch_size)
+        
+        if (idx is not None and dataset is not None):
+            weights = dataset.get_rlure_weights(idx)
+            weights = weights.repeat(depth, 1)
+            loglike_per_act = loglike_per_act * weights # multiply each column of ll_per_act with weights vector
 
-        joint_loglike_per_depth = (N_train / batch_size) * loglike_per_act.sum(dim=1) + prior_loglikes  # (depth)
+        joint_loglike_per_depth = (N_train / batch_size) * loglike_per_act.sum(dim=1) + prior_loglikes  # shape: (depth)
         return joint_loglike_per_depth
 
     def get_marg_loglike(self, joint_loglike_per_depth):
@@ -243,11 +248,10 @@ class depth_categorical_VI(depth_categorical):
         E_loglike = (q * joint_loglike_per_depth).sum(dim=0)
         return E_loglike
 
-    def estimate_ELBO(self, prior_loglikes, act_vec, y, f_neg_loglike, N_train, Beta=1):
+    def estimate_ELBO(self, prior_loglikes, act_vec, y, f_neg_loglike, N_train, Beta=1, idx=None, dataset=None):
         """Estimate ELBO on logjoint of data and network weights"""
         joint_loglike_per_depth = depth_categorical.get_w_joint_loglike(prior_loglikes, act_vec, y,
-                                                                        f_neg_loglike, N_train)
-        # print('Elbo joint loglike per depth', joint_loglike_per_depth)
+                                                                        f_neg_loglike, N_train, idx, dataset)
         E_loglike = self.get_E_loglike(joint_loglike_per_depth)
         KL = self.get_KL()
 

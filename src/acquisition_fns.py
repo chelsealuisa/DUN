@@ -1,5 +1,6 @@
 import numpy as np
 from numpy.lib.arraysetops import isin
+from scipy.special import softmax
 import torch
 from torch.nn import functional as F
 from scipy import stats
@@ -18,20 +19,23 @@ def acquire_samples(model, dataset, query_size=10, query_strategy='random',
                                              sampler=torch.utils.data.SubsetRandomSampler(unlabeled_idx))
        
     if query_strategy=='random':
-        sample_idx = random_query(poolloader, query_size)
+        sample_idx = random_query(poolloader, query_size, dataset.N)
+        for sample in sample_idx:
+            dataset.update_label(sample)
+        return
     elif query_strategy=='entropy':
-        sample_idx = max_entropy_query(poolloader, model, query_size=query_size)
+        sample_idx, q_scores = max_entropy_query(poolloader, model, query_size=query_size)
     elif query_strategy=='variance':
-        sample_idx = max_pred_var_query(poolloader, model, query_size, clip_var)
+        sample_idx, q_scores = max_pred_var_query(poolloader, model, query_size, clip_var)
     else:
         raise Exception(f'{query_strategy} acquisition function not supported.')
     
     # update the labels for the selected indices
-    for sample in sample_idx:
-        dataset.update_label(sample)
+    for sample, q_score in zip(sample_idx, q_scores):
+        dataset.update_label(sample, q_score)
 
 
-def random_query(dataloader, query_size=10):
+def random_query(dataloader, query_size, N):
     """
     Randomly select samples from the pool for which to acquire labels.
     Since data is already shuffled in the DataLoader, simply select the first `query_size` samples.
@@ -39,7 +43,6 @@ def random_query(dataloader, query_size=10):
     torch.manual_seed(0)
     
     sample_idx = []
-    
     for batch in dataloader:
         _, _, idx = batch
         sample_idx.extend(idx.tolist())
@@ -98,8 +101,9 @@ def max_entropy_query(dataloader, net, query_size=10, n_samples=1000, n_bins=10)
     ent = np.asarray(entropies)
     ind = np.asarray(indices)
     sorted_pool = np.argsort(ent)[::-1]
-    
-    return ind[sorted_pool][0:query_size]
+    q_scores = softmax(ent)
+
+    return ind[sorted_pool][0:query_size], q_scores[sorted_pool][0:query_size]
 
 
 def max_pred_var_query(dataloader, net, query_size=10, clip_var=False, n_samples=50):
@@ -142,7 +146,7 @@ def max_pred_var_query(dataloader, net, query_size=10, clip_var=False, n_samples
                         for _ in range(n_samples):
                             x1 = net.model.layers(x)
                             batch_samples.append(x1.data)
-                        batch_samples = torch.stack(batch_samples, dim=0)#.squeeze(2)
+                        batch_samples = torch.stack(batch_samples, dim=0)
                         samples.append(batch_samples)
                     samples = torch.cat(samples, dim=1)
                     # BALD approx
@@ -163,5 +167,6 @@ def max_pred_var_query(dataloader, net, query_size=10, clip_var=False, n_samples
         pred_stds = np.where(pred_stds>1, 1, pred_stds)
     ind = np.asarray(indices)
     sorted_pool = np.argsort(pred_stds)[::-1]
+    q_scores = softmax(pred_stds)
 
-    return ind[sorted_pool][0:query_size]
+    return ind[sorted_pool][0:query_size], q_scores[sorted_pool][0:query_size]

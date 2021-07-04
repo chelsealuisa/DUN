@@ -52,11 +52,12 @@ class DUN(BaseNet):
         self.optimizer = torch.optim.SGD(param_list, lr=self.lr, momentum=self.momentum, weight_decay=self.weight_decay)
 
     def fit(self, x, y):
-        """Optimise stchastically estimated marginal joint of parameters and weights"""
+        """Optimise stochastically estimated marginal joint of parameters and weights"""
         self.model.train()
         x, y = to_variable(var=(x, y), cuda=self.cuda)
         if not self.regression:
             y = y.long()
+            y = y.squeeze(1)
         self.optimizer.zero_grad()
 
         act_vec = self.model.forward(x)
@@ -216,18 +217,53 @@ class DUN_VI(DUN):
                                      schedule, regression, pred_sig)
 
     def fit(self, x, y):
-        """Optimise stchastically estimated marginal joint of parameters and weights"""
+        """Optimise stochastically estimated marginal joint of parameters and weights"""
         self.set_mode_train(train=True)
         x, y = to_variable(var=(x, y), cuda=self.cuda)
         if not self.regression:
             y = y.long()
+            y = y.squeeze(1)
         self.optimizer.zero_grad()
 
         act_vec = self.model.forward(x)
-
         prior_loglikes = self.model.get_w_prior_loglike(k=None)
-
         ELBO = self.prob_model.estimate_ELBO(prior_loglikes, act_vec, y, self.f_neg_loglike, self.N_train, Beta=1)
+        loss = -ELBO / self.N_train
+        loss.backward()
+        self.optimizer.step()
+        self.prob_model.current_posterior = self.prob_model.get_q_probs()
+
+        if self.regression:
+            means, model_stds = depth_categorical.marginalise_d_predict(act_vec.data, self.prob_model.current_posterior,
+                                                                        depth=None, softmax=(not self.regression),
+                                                                        get_std=True)
+            mean_pred_negloglike = self.f_neg_loglike(means, y, model_std=model_stds).mean(dim=0).data
+            err = rms(means, y).item()
+
+            return ELBO.data.item(), mean_pred_negloglike.item(), err
+
+        else:
+            probs = depth_categorical.marginalise_d_predict(act_vec.data, self.prob_model.current_posterior,
+                                                            depth=None, softmax=(not self.regression))
+            mean_pred_negloglike = self.f_neg_loglike_test(torch.log(probs), y).mean(dim=0).data
+            pred = probs.max(dim=1, keepdim=False)[1]  # get the index of the max probability
+            err = pred.ne(y.data).sum().item() / y.shape[0]
+
+            return ELBO.data.item(), mean_pred_negloglike.item(), err
+
+    def fit_bias_reduction(self, x, y, idx, dataset):
+        """Optimise stochastically estimated marginal joint of parameters and weights"""
+        self.set_mode_train(train=True)
+        x, y = to_variable(var=(x, y), cuda=self.cuda)
+        if not self.regression:
+            y = y.long()
+            y = y.squeeze(1)
+        self.optimizer.zero_grad()
+        act_vec = self.model.forward(x)
+        prior_loglikes = self.model.get_w_prior_loglike(k=None)
+        ELBO = self.prob_model.estimate_ELBO(
+            prior_loglikes, act_vec, y, self.f_neg_loglike, self.N_train, Beta=1, idx=idx, dataset=dataset
+            )
 
         loss = -ELBO / self.N_train
         loss.backward()

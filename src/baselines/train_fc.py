@@ -12,8 +12,9 @@ from src.utils import mkdir, cprint
 def train_fc_baseline(net, name, save_dir, batch_size, nb_epochs, trainloader, valloader, cuda, seed,
                       flat_ims=False, nb_its_dev=1, early_stop=None,
                       track_posterior=False, track_exact_ELBO=False, tags=None,
-                      load_path=None, save_freq=None, basedir_prefix=None):
+                      load_path=None, save_freq=None, basedir_prefix=None, bias_reduction_weights=False, dataset=None):
 
+    assert not (bias_reduction_weights and not dataset), "Require DatafeedIndexed object for bias reduction weights"
     rand_name = next(tempfile._get_candidate_names())
     if basedir_prefix:
         basedir = os.path.join(save_dir, name, f'{basedir_prefix}_{rand_name}')
@@ -52,13 +53,15 @@ def train_fc_baseline(net, name, save_dir, batch_size, nb_epochs, trainloader, v
         tic = time.time()
         nb_samples = 0
         for x, y, *_ in trainloader:
+            if len(_)>0:
+                idx = _[0]
             if flat_ims:
                 x = x.view(x.shape[0], -1)
-
-            if net.regression:
-                marg_loglike_estimate, minus_loglike, err = net.fit(x, y)
+            
+            if bias_reduction_weights:
+                marg_loglike_estimate, minus_loglike, err = net.fit_bias_reduction(x, y, idx, dataset)
             else:
-                marg_loglike_estimate, minus_loglike, err = net.fit(x, y.squeeze(1))
+                marg_loglike_estimate, minus_loglike, err = net.fit(x, y)
 
             marginal_loglike_estimate[i] += marg_loglike_estimate * x.shape[0]
             err_train[i] += err * x.shape[0]

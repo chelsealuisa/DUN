@@ -96,9 +96,35 @@ class regression_baseline_net(BaseNet):
         x, y = to_variable(var=(x, y), cuda=self.cuda)
         if not self.regression:
             y = y.long()
+            y = y.squeeze(1)
         self.optimizer.zero_grad()
         mean = self.model.forward(x)
         NLL = self.f_neg_loglike(mean, y).mean(dim=0)
+        NLL.backward()
+        self.optimizer.step()
+
+        if self.regression:
+            err = rms(mean, y).item()
+        else:
+            pred = mean.max(dim=1, keepdim=False)[1] # get the index of the max probability
+            err = pred.ne(y.data).sum().item() / y.shape[0]
+        
+        return -NLL.data.item(), NLL.data.item(), err
+
+    def fit_bias_reduction(self, x, y, idx, dataset):
+        """Standard training loop (dropout and ensembles) with active learning bias reduction weights"""
+        self.model.train()
+        x, y = to_variable(var=(x, y), cuda=self.cuda)
+        if not self.regression:
+            y = y.long()
+            y = y.squeeze(1)
+        self.optimizer.zero_grad()
+        mean = self.model.forward(x)
+        NLL_per_x = self.f_neg_loglike(mean, y)
+        weights = dataset.get_rlure_weights(idx)
+        weights = torch.reshape(weights, NLL_per_x.shape)
+        NLL = NLL_per_x * weights
+        NLL = NLL.mean(dim=0)
         NLL.backward()
         self.optimizer.step()
 
@@ -160,17 +186,16 @@ class regression_baseline_net_VI(regression_baseline_net):
         x, y = to_variable(var=(x, y), cuda=self.cuda)
         if not self.regression:
             y = y.long()
+            y = y.squeeze(1)
         self.optimizer.zero_grad()
 
         sample_means = self.model.forward(x, self.train_samples)
-
         batch_size = x.shape[0]
         repeat_dims = [self.train_samples] + [1 for i in range(1, len(y.shape))]  # Repeat batchwise without interleave
         y_expand = y.repeat(*repeat_dims)  # targets are same across acts -> interleave
         sample_means_flat = sample_means.view(self.train_samples * batch_size, -1)  # flattening results in batch_n changing first
         
         E_NLL = self.f_neg_loglike(sample_means_flat, y_expand).view(self.train_samples, batch_size).mean(dim=(0,1))
-
         minus_E_ELBO = E_NLL + self.model.get_KL() / self.N_train
         minus_E_ELBO.backward()
         self.optimizer.step()
@@ -182,7 +207,33 @@ class regression_baseline_net_VI(regression_baseline_net):
             err = pred.ne(y.data).sum().item() / y.shape[0]
         return -minus_E_ELBO.data.item(), E_NLL.data.item(), err
 
+    def fit_bias_reduction(self, x, y, idx, dataset):
+        """Optimise stochastically estimated marginal joint of parameters and weights"""
+        self.model.train()
+        x, y = to_variable(var=(x, y), cuda=self.cuda)
+        if not self.regression:
+            y = y.long()
+            y = y.squeeze(1)
+        self.optimizer.zero_grad()
 
+        sample_means = self.model.forward(x, self.train_samples)
+        batch_size = x.shape[0]
+        repeat_dims = [self.train_samples] + [1 for i in range(1, len(y.shape))]  # Repeat batchwise without interleave
+        y_expand = y.repeat(*repeat_dims)  # targets are same across acts -> interleave
+        sample_means_flat = sample_means.view(self.train_samples * batch_size, -1)  # flattening results in batch_n changing first
+        
+        E_NLL_per_x = self.f_neg_loglike(sample_means_flat, y_expand).view(self.train_samples, batch_size).mean(dim=0)
+        weights = dataset.get_rlure_weights(idx)
+        weights = torch.reshape(weights, E_NLL_per_x.shape)
+        E_NLL = E_NLL_per_x * weights
+        E_NLL = E_NLL.mean(dim=0)
+        minus_E_ELBO = E_NLL + self.model.get_KL() / self.N_train
+        minus_E_ELBO.backward()
+        self.optimizer.step()
 
-
-
+        if self.regression:
+            err = rms(sample_means.mean(dim=0), y).item()
+        else:
+            pred = sample_means.mean(dim=0).max(dim=1, keepdim=False)[1]
+            err = pred.ne(y.data).sum().item() / y.shape[0]
+        return -minus_E_ELBO.data.item(), E_NLL.data.item(), err
