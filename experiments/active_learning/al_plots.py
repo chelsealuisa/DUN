@@ -1,6 +1,9 @@
 import numpy as np
 from src.plots import plot_al_mean_rmse, plot_al_rmse
 import matplotlib.pyplot as plt
+import os
+import fnmatch
+import pickle as pl
 
 # Mean and std per method
 files = [
@@ -41,40 +44,81 @@ for dataset in ['wiggle']: #['agw_1d', 'wiggle']:
     #sgd = np.genfromtxt(f'{savedir}/SGD_{dataset}_3_100_0.001_0.0001_1_{init_train}_variance/results.csv', delimiter=',')[:,0]
     #plot_al_mean_rmse(f'{savedir}/{dataset}_rmse_all_variance_5000ep', dun, dropout, mfvi, sgd, dataset, n_queries, query_size, init_train)
     plot_al_mean_rmse(f'{savedir}/{dataset}_rmse_all_variance_5000ep', dun, dropout, mfvi, dataset, n_queries, query_size, init_train)
-
 '''
 
-# Compare acquisition functions
-dataset = 'wiggle'
-savedir = 'saves'
-n_queries = 20
-init_train_size = 10
-query_size = 10
+# Compare RMSE with error bars
+dataset = 'boston'
+savedir = 'saves_regression'
+n_queries = 17
+init_train_size = 20
+query_size = 20
 
-file_ran = f'DUN_{dataset}_10_20_0.001_0.0001_1_{init_train_size}_variance_clip_ntrain'
-file_ent = f'DUN_{dataset}_10_20_0.001_0.0001_1_{init_train_size}_0.95_variance_clip_ntrain'
-#file_var = f'DUN_{dataset}_10_100_0.001_0.0001_1_{init_train_size}_0.95_variance_ntrain'
-results_ran = np.genfromtxt(f'{savedir}/{file_ran}/results.csv', delimiter=',')
-results_ent = np.genfromtxt(f'{savedir}/{file_ent}/results.csv', delimiter=',')
-#results_var = np.genfromtxt(f'{savedir}/{file_var}/results.csv', delimiter=',')
-means_ran = results_ran[:,0]
-stds_ran = results_ran[:,1]
-means_ent = results_ent[:,0]
-stds_ent = results_ent[:,1]
-#means_var = results_var[:,0]
-#stds_var = results_var[:,1]
+file_1 = f'DUN_{dataset}_10_100_0.001_0.0001_1_{init_train_size}'
+file_2 = f'Dropout_{dataset}_1_100_0.001_0.0001_1_{init_train_size}'
+file_3 = f'Dropout_{dataset}_4_100_0.001_0.0001_1_{init_train_size}'
+results_1 = np.genfromtxt(f'{savedir}/{file_1}/results.csv', delimiter=',')
+results_2 = np.genfromtxt(f'{savedir}/{file_2}/results.csv', delimiter=',')
+results_3 = np.genfromtxt(f'{savedir}/{file_3}/results.csv', delimiter=',')
+means_1 = results_1[:,0]
+stds_1 = results_1[:,1]
+means_2 = results_2[:,0]
+stds_2 = results_2[:,1]
+means_3 = results_3[:,0]
+stds_3 = results_3[:,1]
 
 plt.figure(dpi=300)
 x = np.arange(init_train_size, init_train_size + n_queries*query_size, query_size)
-plt.plot(x, means_ran, c='tab:blue', label='max variance clipped, uniform prior')
-plt.fill_between(x, means_ran+stds_ran, means_ran-stds_ran, alpha=0.3, color='tab:blue')
-plt.plot(x, means_ent, c='tab:red', label='max variance clipped, 0.95 prior decay')
-plt.fill_between(x, means_ent+stds_ent, means_ent-stds_ent, alpha=0.3, color='tab:red')
-#plt.plot(x, means_var, c='tab:green', label='max variance, 0.95 prior decay')
-#plt.fill_between(x, means_var+stds_var, means_var-stds_var, alpha=0.3, color='tab:green')
+plt.plot(x, means_1, c='tab:blue', label='DUN')
+plt.fill_between(x, means_1+stds_1, means_1-stds_1, alpha=0.3, color='tab:blue')
+plt.plot(x, means_2, c='tab:red', label='Dropout, 1 layer')
+plt.fill_between(x, means_2+stds_2, means_2-stds_2, alpha=0.3, color='tab:red')
+plt.plot(x, means_3, c='tab:green', label='Dropout, 4 layers')
+plt.fill_between(x, means_3+stds_3, means_3-stds_3, alpha=0.3, color='tab:green')
 plt.xlabel('Train set size')
 plt.ylabel('Validation RMSE')
 plt.title(f'{dataset} dataset')
 plt.legend()
-plt.savefig( f'{savedir}/{dataset}_var_clipped_prior_decay_0.95.pdf', format='pdf', bbox_inches='tight')
+plt.savefig( f'{savedir}/{dataset}_DUN_Dropout.pdf', format='pdf', bbox_inches='tight')
 plt.close()
+
+'''
+# Side-by-side posterior bar plots
+dir = './saves_regression/DUN_concrete_10_100_0.001_0.0001_1_50_variance_ntrain'
+small = 50
+large = 630
+n_runs = 5
+
+posteriors = []
+for i in range(n_runs):
+    for file in os.listdir(f'{dir}/{i}/'):
+        if fnmatch.fnmatch(file, f'{small}_*'):
+            f_name = file
+    posteriors.append(np.genfromtxt(f'{dir}/{i}/{f_name}/media/approx_d_posterior.csv', delimiter=',')[-1,:])
+posteriors = np.array(posteriors)
+means_small = posteriors.mean(axis=0)
+stds_small = posteriors.std(axis=0)
+
+posteriors = []
+for i in range(n_runs):
+    for file in os.listdir(f'{dir}/{i}/'):
+        if fnmatch.fnmatch(file, f'{large}_*'):
+            f_name = file
+    posteriors.append(np.genfromtxt(f'{dir}/{i}/{f_name}/media/approx_d_posterior.csv', delimiter=',')[-1,:])
+posteriors = np.array(posteriors)
+means_large = posteriors.mean(axis=0)
+stds_large = posteriors.std(axis=0)
+    
+x = np.array([i for i in range(means_small.shape[0])])
+width = 0.4 # width of bars
+
+fig, ax = plt.subplots(dpi=300)
+ax1 = ax.bar(x - width/2, means_small, width, yerr=stds_small, label=f'Train size: {small}')
+ax2 = ax.bar(x + width/2, means_large, width, yerr=stds_large, label=f'Train size: {large}')
+plt.title(f'Approx posterior distribution over depth')
+plt.xlabel('Layer')
+plt.legend(loc='lower right')
+plt.savefig(f'{dir}/posterior_plots/{small}_{large}_d_post_approx.pdf', format='pdf', bbox_inches='tight')
+with open(f'{dir}/posterior_plots/{small}_{large}_depth_post_approx.pickle', 'wb') as output_file:
+    pl.dump(fig, output_file)
+plt.close(fig=None)
+'''

@@ -404,7 +404,7 @@ def plot_al_rmse(savefile, title, means, stds, n_queries, query_size, init_train
         plt.close(fig=None)
 
 
-def plot_al_mean_rmse(savefile, dun, dropout, mfvi,  dataset,
+def plot_al_mean_rmse(savefile, dun, dropout, mfvi, sgd, dataset,
                       n_queries, query_size, init_train_size=10, dpi=300, show=False):
 
     plt.figure(dpi=dpi)
