@@ -131,10 +131,18 @@ valloader = torch.utils.data.DataLoader(testset, batch_size, shuffle=False, pin_
 #testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False, pin_memory=True,
 #                                        num_workers=args.num_workers)
 
+# Save data for plots
+mkdir(f'{args.savedir}/{name}/')
+np.savetxt(f'{args.savedir}/{name}/X_train.csv', X_train, delimiter=',')
+np.savetxt(f'{args.savedir}/{name}/y_train.csv', y_train, delimiter=',')
+np.savetxt(f'{args.savedir}/{name}/X_val.csv', X_test, delimiter=',')
+np.savetxt(f'{args.savedir}/{name}/y_val.csv', y_test, delimiter=',')
+
 # Experiment runs
 n_runs = 5
 results = np.zeros((args.n_queries, n_runs))
 results_train = np.zeros((args.n_queries, n_runs))
+results_NLL = np.zeros((args.n_queries, n_runs))
 
 for j in range(n_runs):
     seed = j
@@ -216,19 +224,29 @@ for j in range(n_runs):
         min_train_error = min([err for err in err_train if err>=0])
         err_dev = err_dev[::nb_its_dev] # keep epochs for which val error evaluated 
         min_val_error = min([err for err in err_dev if err>=0])
+        min_nll = min([nll for nll in train_mean_predictive_loglike])
         results_train[i,j] = min_train_error
         results[i,j] = min_val_error
+        results_NLL[i,j] = min_nll
+        
+        # Acquire data
+        net.load(f'{basedir}/models/theta_best.dat')
+        acquire_samples(net, trainset, args.query_size, query_strategy=args.query_strategy,
+                        clip_var=False, bias_reduction_weights=args.bias_weights)
+        n_labelled = int(sum(1 - trainset.unlabeled_mask))
+        current_labeled_idx = np.where(trainset.unlabeled_mask == 0)[0]
+        acquired_data_idx = current_labeled_idx[~np.isin(current_labeled_idx, labeled_idx)] 
+        unlabeled_idx = np.concatenate([np.where(trainset.unlabeled_mask == 1)[0],acquired_data_idx])
 
         # Create plots
         media_dir = basedir + '/media'
         show_range = 5
         ylim = 3
         add_noise = False
-        
-        # Acquire data
-        net.load(f'{basedir}/models/theta_best.dat')
-        acquire_samples(net, trainset, args.query_size, query_strategy=args.query_strategy)
-        n_labelled = int(sum(1 - trainset.unlabeled_mask))
+
+        np.savetxt(f'{media_dir}/unlabeled_idx.csv', unlabeled_idx, delimiter=',')
+        np.savetxt(f'{media_dir}/labeled_idx.csv', labeled_idx, delimiter=',')
+        np.savetxt(f'{media_dir}/acquired_data_idx.csv', acquired_data_idx, delimiter=',')
         
         if args.inference == 'DUN':
             np.savetxt(f'{media_dir}/approx_d_posterior.csv', approx_d_posterior, delimiter=',')
@@ -273,11 +291,18 @@ for j in range(n_runs):
         pl.dump(fig_handle, output_file)
     plt.close()
 
+# save and plot test error
 means = results.mean(axis=1).reshape(-1,1)
 stds = results.std(axis=1).reshape(-1,1)
 results = np.concatenate((means, stds, results), axis=1)
 np.savetxt(f'{args.savedir}/{name}/results.csv', results, delimiter=',')
 plot_al_rmse(f'{args.savedir}/{name}/rmse_plot', name, means.reshape(-1), stds.reshape(-1), args.n_queries, args.query_size, args.init_train, accuracy=True)
+
+# save NLL
+means_NLL = results_NLL.mean(axis=1).reshape(-1,1)
+stds_NLL = results_NLL.std(axis=1).reshape(-1,1)
+results_NLL = np.concatenate((means_NLL, stds_NLL, results_NLL), axis=1)
+np.savetxt(f'{args.savedir}/{name}/results_NLL.csv', results_NLL, delimiter=',')
 
 # plot mean posterior distributions
 if args.inference=='DUN':

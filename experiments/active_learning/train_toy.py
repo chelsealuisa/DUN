@@ -145,6 +145,7 @@ np.savetxt(f'{args.savedir}/{name}/y_val.csv', y_val, delimiter=',')
 n_runs = 5
 results = np.zeros((args.n_queries, n_runs))
 results_train = np.zeros((args.n_queries, n_runs))
+results_NLL = np.zeros((args.n_queries, n_runs))
 
 for j in range(n_runs):
     seed = j
@@ -228,19 +229,21 @@ for j in range(n_runs):
                         load_path=None, save_freq=nb_its_dev, basedir_prefix=n_labelled,
                         bias_reduction_weights=args.bias_weights, dataset=trainset)
 
-        # Record performance
+        # Record performance (train err, test err, NLL)
         min_train_error = min([err for err in err_train if err>=0])
-        err_dev = err_dev[::nb_its_dev] # keep epochs for which val error evaluated 
+        err_dev = err_dev[::nb_its_dev] # keep only epochs for which val error evaluated 
         min_val_error = min([err for err in err_dev if err>=0])
+        min_nll = min([nll for nll in train_mean_predictive_loglike])
         results_train[i,j] = min_train_error
         results[i,j] = min_val_error
+        results_NLL[i,j] = min_nll
 
         # Acquire data
         net.load(f'{basedir}/models/theta_best.dat')
-        acquire_samples(net, trainset, args.query_size, query_strategy=args.query_strategy, clip_var=args.clip_var)
+        acquire_samples(net, trainset, args.query_size, query_strategy=args.query_strategy, 
+                        clip_var=args.clip_var, bias_reduction_weights=args.bias_weights)
         n_labelled = int(sum(1 - trainset.unlabeled_mask))
         current_labeled_idx = np.where(trainset.unlabeled_mask == 0)[0]
-        
         acquired_data_idx = current_labeled_idx[~np.isin(current_labeled_idx, labeled_idx)] 
         unlabeled_idx = np.concatenate([np.where(trainset.unlabeled_mask == 1)[0],acquired_data_idx])
 
@@ -388,11 +391,18 @@ for j in range(n_runs):
                 pl.dump(fig_handle, output_file)
     plt.close(plt.gcf())
 
+# save and plot test error
 means = results.mean(axis=1).reshape(-1,1)
 stds = results.std(axis = 1).reshape(-1,1)
 results = np.concatenate((means, stds, results), axis=1)
 np.savetxt(f'{args.savedir}/{name}/results.csv', results, delimiter=',')
 plot_al_rmse(f'{args.savedir}/{name}/rmse_plot', name, means.reshape(-1), stds.reshape(-1), args.n_queries, args.query_size, args.init_train)
+
+# save NLL
+means_NLL = results_NLL.mean(axis=1).reshape(-1,1)
+stds_NLL = results_NLL.std(axis=1).reshape(-1,1)
+results_NLL = np.concatenate((means_NLL, stds_NLL, results_NLL), axis=1)
+np.savetxt(f'{args.savedir}/{name}/results_NLL.csv', results_NLL, delimiter=',')
 
 # plot mean posterior distributions
 if args.inference=='DUN':
