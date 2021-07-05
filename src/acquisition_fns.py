@@ -1,16 +1,16 @@
 import numpy as np
 from numpy.lib.arraysetops import isin
 from scipy.special import softmax
+import random
 import torch
 from torch.nn import functional as F
 from scipy import stats
 from src.utils import cprint
 from src.DUN.training_wrappers import DUN, DUN_VI
 
-import sys
 
-def acquire_samples(model, dataset, query_size=10, query_strategy='random', 
-                    batch_size=2048, num_workers=4, clip_var=False):
+def acquire_samples(model, dataset, query_size=10, query_strategy='random', batch_size=2048, 
+                    num_workers=4, clip_var=False, bias_reduction_weights=False):
     
     unlabeled_idx = np.nonzero(dataset.unlabeled_mask)[0]
     
@@ -24,9 +24,9 @@ def acquire_samples(model, dataset, query_size=10, query_strategy='random',
             dataset.update_label(sample)
         return
     elif query_strategy=='entropy':
-        sample_idx, q_scores = max_entropy_query(poolloader, model, query_size=query_size)
+        sample_idx, q_scores = max_entropy_query(poolloader, model, query_size, bias_weights=bias_reduction_weights)
     elif query_strategy=='variance':
-        sample_idx, q_scores = max_pred_var_query(poolloader, model, query_size, clip_var)
+        sample_idx, q_scores = max_pred_var_query(poolloader, model, query_size, clip_var, bias_weights=bias_reduction_weights)
     else:
         raise Exception(f'{query_strategy} acquisition function not supported.')
     
@@ -53,7 +53,7 @@ def random_query(dataloader, query_size, N):
     return sample_idx[0:query_size]
 
 
-def max_entropy_query(dataloader, net, query_size=10, n_samples=1000, n_bins=10):
+def max_entropy_query(dataloader, net, query_size=10, n_samples=1000, n_bins=10, bias_weights=False):
     '''Query points with max entropy. For regression, entropy approximated via histogram of sampled predictions.'''    
     entropies = []
     indices = []
@@ -101,12 +101,26 @@ def max_entropy_query(dataloader, net, query_size=10, n_samples=1000, n_bins=10)
     ent = np.asarray(entropies)
     ind = np.asarray(indices)
     sorted_pool = np.argsort(ent)[::-1]
-    q_scores = softmax(ent)
+    softmax_scores = softmax(ent)
 
-    return ind[sorted_pool][0:query_size], q_scores[sorted_pool][0:query_size]
+    if bias_weights:
+        indices = []
+        q_scores = []
+        for i in range(query_size):
+            # sample a point with probability = softmax score
+            choice = random.choices(ind, weights=softmax_scores, k=1)[0]
+            q_scores.append(softmax_scores[np.where(ind==choice)][0])
+            # remove is from the pool and recompute softmaxes
+            indices.append(choice)
+            ent = np.delete(ent, np.where(ind==choice))
+            ind = np.delete(ind, np.where(ind==choice))
+            softmax_scores = softmax(ent)
+        return indices, q_scores
+    else:
+        return ind[sorted_pool][0:query_size], softmax_scores[sorted_pool][0:query_size]
 
 
-def max_pred_var_query(dataloader, net, query_size=10, clip_var=False, n_samples=50):
+def max_pred_var_query(dataloader, net, query_size=10, clip_var=False, n_samples=50, bias_weights=False):
     '''
     Query points with max model predictive variance (return_model_std=True).
     Equivalent to BALD acquisition.
@@ -167,6 +181,20 @@ def max_pred_var_query(dataloader, net, query_size=10, clip_var=False, n_samples
         pred_stds = np.where(pred_stds>1, 1, pred_stds)
     ind = np.asarray(indices)
     sorted_pool = np.argsort(pred_stds)[::-1]
-    q_scores = softmax(pred_stds)
+    softmax_scores = softmax(pred_stds)
 
-    return ind[sorted_pool][0:query_size], q_scores[sorted_pool][0:query_size]
+    if bias_weights:
+        indices = []
+        q_scores = []
+        for i in range(query_size):
+            # sample a point with probability = softmax score
+            choice = random.choices(ind, weights=softmax_scores, k=1)[0]
+            q_scores.append(softmax_scores[np.where(ind==choice)][0])
+            # remove is from the pool and recompute softmaxes
+            indices.append(choice)
+            pred_stds = np.delete(pred_stds, np.where(ind==choice))
+            ind = np.delete(ind, np.where(ind==choice))
+            softmax_scores = softmax(pred_stds)
+        return indices, q_scores
+    else:
+        return ind[sorted_pool][0:query_size], softmax_scores[sorted_pool][0:query_size]
