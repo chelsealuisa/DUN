@@ -143,9 +143,11 @@ np.savetxt(f'{args.savedir}/{name}/y_val.csv', y_test, delimiter=',')
 
 # Experiment runs
 n_runs = args.n_runs
-results = np.zeros((args.n_queries, n_runs))
-results_train = np.zeros((args.n_queries, n_runs))
-results_NLL = np.zeros((args.n_queries, n_runs))
+train_err = np.zeros((args.n_queries, n_runs))
+test_err = np.zeros((args.n_queries, n_runs))
+train_NLL = np.zeros((args.n_queries, n_runs))
+test_NLL = np.zeros((args.n_queries, n_runs))
+mll = np.zeros((args.n_queries, n_runs))
 
 for j in range(n_runs):
     seed = j
@@ -243,6 +245,10 @@ for j in range(n_runs):
         test_NLL[i,j] = min_test_nll
         mll[i,j] = max_mll
 
+        # Save current dataset
+        with open(f'{basedir}/media/trainset.pl', 'wb') as trainset_file:
+            pl.dump(trainset, trainset_file)
+        
         # Acquire data
         net.load(f'{basedir}/models/theta_best.dat')
         acquire_samples(net, trainset, args.query_size, query_strategy=args.query_strategy, 

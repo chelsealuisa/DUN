@@ -237,6 +237,10 @@ for j in range(n_runs):
         test_NLL[i,j] = min_test_nll
         mll[i,j] = max_mll
         
+        # Save current dataset
+        with open(f'{basedir}/media/trainset.pl', 'wb') as trainset_file:
+            pl.dump(trainset, trainset_file)
+        
         # Acquire data
         net.load(f'{basedir}/models/theta_best.dat')
         acquire_samples(net, trainset, args.query_size, query_strategy=args.query_strategy,
