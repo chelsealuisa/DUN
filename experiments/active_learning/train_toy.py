@@ -1,6 +1,7 @@
 import os
 import argparse
 from time import time
+import sys
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -55,6 +56,8 @@ parser.add_argument('--wd', type=float, help='weight_decay, (default: 0)', defau
 parser.add_argument('--network', type=str,
                     help='model type when using DUNs (other methods use ResNet) (default: ResNet)',
                     default='ResNet', choices=['ResNet', 'MLP'])
+parser.add_argument('--n_runs', type=int, default="5",
+                    help='number of runs with different random seeds to perform (default: 5)')
 parser.add_argument('--n_queries', type=int, 
                     help='number of iterations for active learning (default: 20)', default=20)
 parser.add_argument('--query_size', type=int, 
@@ -142,10 +145,12 @@ np.savetxt(f'{args.savedir}/{name}/X_val.csv', X_val, delimiter=',')
 np.savetxt(f'{args.savedir}/{name}/y_val.csv', y_val, delimiter=',')
 
 # Experiment runs
-n_runs = 5
-results = np.zeros((args.n_queries, n_runs))
-results_train = np.zeros((args.n_queries, n_runs))
-results_NLL = np.zeros((args.n_queries, n_runs))
+n_runs = args.n_runs
+train_err = np.zeros((args.n_queries, n_runs))
+test_err = np.zeros((args.n_queries, n_runs))
+train_NLL = np.zeros((args.n_queries, n_runs))
+test_NLL = np.zeros((args.n_queries, n_runs))
+mll = np.zeros((args.n_queries, n_runs))
 
 for j in range(n_runs):
     seed = j
@@ -229,14 +234,21 @@ for j in range(n_runs):
                         load_path=None, save_freq=nb_its_dev, basedir_prefix=n_labelled,
                         bias_reduction_weights=args.bias_weights, dataset=trainset)
 
+        
         # Record performance (train err, test err, NLL)
-        min_train_error = min([err for err in err_train if err>=0])
         err_dev = err_dev[::nb_its_dev] # keep only epochs for which val error evaluated 
-        min_val_error = min([err for err in err_dev if err>=0])
-        min_nll = min([nll for nll in train_mean_predictive_loglike])
-        results_train[i,j] = min_train_error
-        results[i,j] = min_val_error
-        results_NLL[i,j] = min_nll
+        dev_mean_predictive_loglike = dev_mean_predictive_loglike[::nb_its_dev]
+        
+        min_train_error = min([err for err in err_train if err>=0])
+        min_test_error = min([err for err in err_dev if err>=0])
+        min_train_nll = min([nll for nll in train_mean_predictive_loglike])
+        min_test_nll = min([nll for nll in dev_mean_predictive_loglike])
+        max_mll = max([mll for mll in marginal_loglike_estimate])
+        train_err[i,j] = min_train_error
+        test_err[i,j] = min_test_error
+        train_NLL[i,j] = min_train_nll
+        test_NLL[i,j] = min_test_nll
+        mll[i,j] = max_mll
 
         # Acquire data
         net.load(f'{basedir}/models/theta_best.dat')
@@ -375,14 +387,15 @@ for j in range(n_runs):
             plt.close('all')    
 
 
-    cprint('p', f'Train errors: {results_train[:,j]}')
-    cprint('p', f'Val errors: {results[:,j]}\n')
-    np.savetxt(f'{args.savedir}/{name}/{j}/results_{j}.csv', results[:,j], delimiter=',')
+    cprint('p', f'Train errors: {train_err[:,j]}')
+    cprint('p', f'Val errors: {test_err[:,j]}\n')
+    np.savetxt(f'{args.savedir}/{name}/{j}/train_err_{j}.csv', train_err[:,j], delimiter=',')
+    np.savetxt(f'{args.savedir}/{name}/{j}/test_err_{j}.csv', test_err[:,j], delimiter=',')
 
     # plot validation error
     fig_handle = plt.figure(dpi=300)
     x = np.arange(args.init_train, args.init_train + args.n_queries*args.query_size, args.query_size)
-    plt.plot(x, results[:,j])
+    plt.plot(x, test_err[:,j])
     plt.xlabel('Train set size')
     plt.ylabel('Validation RMSE')
     plt.tight_layout()
@@ -391,18 +404,33 @@ for j in range(n_runs):
                 pl.dump(fig_handle, output_file)
     plt.close(plt.gcf())
 
-# save and plot test error
-means = results.mean(axis=1).reshape(-1,1)
-stds = results.std(axis = 1).reshape(-1,1)
-results = np.concatenate((means, stds, results), axis=1)
-np.savetxt(f'{args.savedir}/{name}/results.csv', results, delimiter=',')
+# save and plot error
+means = test_err.mean(axis=1).reshape(-1,1)
+stds = test_err.std(axis = 1).reshape(-1,1)
+test_err = np.concatenate((means, stds, test_err), axis=1)
+np.savetxt(f'{args.savedir}/{name}/test_err.csv', test_err, delimiter=',')
 plot_al_rmse(f'{args.savedir}/{name}/rmse_plot', name, means.reshape(-1), stds.reshape(-1), args.n_queries, args.query_size, args.init_train)
+means = train_err.mean(axis=1).reshape(-1,1)
+stds = train_err.std(axis = 1).reshape(-1,1)
+train_err = np.concatenate((means, stds, train_err), axis=1)
+np.savetxt(f'{args.savedir}/{name}/train_err.csv', train_err, delimiter=',')
 
 # save NLL
-means_NLL = results_NLL.mean(axis=1).reshape(-1,1)
-stds_NLL = results_NLL.std(axis=1).reshape(-1,1)
-results_NLL = np.concatenate((means_NLL, stds_NLL, results_NLL), axis=1)
-np.savetxt(f'{args.savedir}/{name}/results_NLL.csv', results_NLL, delimiter=',')
+means_NLL = test_NLL.mean(axis=1).reshape(-1,1)
+stds_NLL = test_NLL.std(axis=1).reshape(-1,1)
+test_NLL = np.concatenate((means_NLL, stds_NLL, test_NLL), axis=1)
+np.savetxt(f'{args.savedir}/{name}/test_NLL.csv', test_NLL, delimiter=',')
+means_NLL = train_NLL.mean(axis=1).reshape(-1,1)
+stds_NLL = train_NLL.std(axis=1).reshape(-1,1)
+train_NLL = np.concatenate((means_NLL, stds_NLL, train_NLL), axis=1)
+np.savetxt(f'{args.savedir}/{name}/train_NLL.csv', train_NLL, delimiter=',')
+
+# save MLL
+means_mll = mll.mean(axis=1).reshape(-1,1)
+stds_mll = mll.std(axis=1).reshape(-1,1)
+mll = np.concatenate((means_mll, stds_mll, mll), axis=1)
+np.savetxt(f'{args.savedir}/{name}/mll.csv', mll, delimiter=',')
+
 
 # plot mean posterior distributions
 if args.inference=='DUN':
