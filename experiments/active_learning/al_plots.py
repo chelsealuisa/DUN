@@ -4,6 +4,14 @@ import matplotlib.pyplot as plt
 import os
 import fnmatch
 import pickle as pl
+from src.DUN.training_wrappers import DUN_VI
+from src.DUN.stochastic_fc_models import arq_uncert_fc_resnet
+from src.probability import depth_categorical_VI
+from src.utils import cprint
+import torch
+
+c = ['#1f77b4', '#d62728', '#ff7f0e', '#2ca02c', '#9467bd',
+     '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf', '#d62728']
 
 
 def plot_rmse_mean_std_single_method():
@@ -51,15 +59,15 @@ def plot_mean_rmse_all_methods():
 
 def plot_rmse_errorbars():
     # Compare RMSE with error bars
-    dataset = 'boston'
-    savedir = 'saves_regression'
-    n_queries = 17
-    init_train_size = 20
-    query_size = 20
+    dataset = 'agw_1d'
+    savedir = 'saves'
+    n_queries = 30
+    init_train_size = 10
+    query_size = 10
 
-    file_1 = f'DUN_{dataset}_10_100_0.001_0.0001_1_{init_train_size}_variance_clip_ntrain'
-    file_2 = f'SGD_{dataset}_1_100_0.001_0.0001_1_{init_train_size}_variance_clip_ntrain'
-    file_3 = f'SGD_{dataset}_4_100_0.001_0.0001_1_{init_train_size}_variance_clip_ntrain'
+    file_1 = f'DUN_{dataset}_10_100_0.001_0.0001_1_{init_train_size}_ntrain'
+    file_2 = f'DUN_{dataset}_10_100_0.001_0.0001_1_{init_train_size}_entropy_ntrain'
+    file_3 = f'DUN_{dataset}_10_100_0.001_0.0001_1_{init_train_size}_variance_clip_ntrain'
     #file_4 = f'SGD_{dataset}_3_100_0.001_0.0001_1_{init_train_size}_ntrain'
     results_1 = np.genfromtxt(f'{savedir}/{file_1}/results.csv', delimiter=',')
     results_2 = np.genfromtxt(f'{savedir}/{file_2}/results.csv', delimiter=',')
@@ -76,19 +84,19 @@ def plot_rmse_errorbars():
 
     plt.figure(dpi=300)
     x = np.arange(init_train_size, init_train_size + n_queries*query_size, query_size)
-    plt.plot(x, means_1, c='tab:blue', label='DUN')
+    plt.plot(x, means_1, c='tab:blue', label='Random')
     plt.fill_between(x, means_1+stds_1, means_1-stds_1, alpha=0.3, color='tab:blue')
-    plt.plot(x, means_2, c='tab:red', label='SGD, depth 1')
+    plt.plot(x, means_2, c='tab:red', label='Max entropy')
     plt.fill_between(x, means_2+stds_2, means_2-stds_2, alpha=0.3, color='tab:red')
-    plt.plot(x, means_3, c='tab:orange', label='SGD, depth 4')
-    plt.fill_between(x, means_3+stds_3, means_3-stds_3, alpha=0.3, color='tab:orange')
+    plt.plot(x, means_3, c='tab:green', label='Max variance')
+    plt.fill_between(x, means_3+stds_3, means_3-stds_3, alpha=0.3, color='tab:green')
     #plt.plot(x, means_4, c='tab:orange', label='SGD')
     #plt.fill_between(x, means_4+stds_4, means_4-stds_4, alpha=0.3, color='tab:orange')
     plt.xlabel('Train set size')
     plt.ylabel('Validation RMSE')
     plt.title(f'{dataset} dataset')
     plt.legend()
-    plt.savefig( f'{savedir}/{dataset}_DUN_SGD_fixed_depth.pdf', format='pdf', bbox_inches='tight')
+    plt.savefig( f'{savedir}/{dataset}_DUN_acq_fns.pdf', format='pdf', bbox_inches='tight')
     plt.close()
 
 
@@ -136,11 +144,11 @@ def plot_sidebyside_posterior_barplots():
 
 def plot_bias_reduction_weights():
     # Bias reduction weights plots
-    savedir = 'saves'
-    dataset = 'wiggle'
-    n_queries = 20
-    init_train_size = 10
-    query_size = 10
+    savedir = 'saves_regression'
+    dataset = 'boston'
+    n_queries = 17
+    init_train_size = 20
+    query_size = 20
     method = 'MFVI'
     depth = 3
 
@@ -191,5 +199,97 @@ def plot_bias_reduction_weights():
     plt.close()
 
 
+def plot_mean_layerwise():
+    basedir = 'saves/DUN_wiggle_10_100_0.001_0.0001_1_10_variance_clip_ntrain'
+    run = 0
+    acq_step = '10_ayxp00me'
+    inference = 'DUN'
+    query_strategy = 'variance'
+    clip_var = True
+    media_dir = f'{basedir}/{run}/{acq_step}/media/'
+    
+    X_train = np.genfromtxt(f'{basedir}/X_train.csv', delimiter=',')
+    y_train = np.genfromtxt(f'{basedir}/y_train.csv', delimiter=',')
+    labeled_idx = np.genfromtxt(f'{basedir}/{run}/{acq_step}/media/labeled_idx.csv', delimiter=',').astype('int')
+    acquired_data_idx = np.genfromtxt(f'{basedir}/{run}/{acq_step}/media/acquired_data_idx.csv', delimiter=',').astype('int')
+    unlabeled_idx = np.genfromtxt(f'{basedir}/{run}/{acq_step}/media/unlabeled_idx.csv', delimiter=',').astype('int')
+    input_dim = 1
+    output_dim = 1
+
+    n_labelled = len(labeled_idx)
+    model = arq_uncert_fc_resnet(input_dim, output_dim, 100, 10, w_prior=None, BMA_prior=False)
+    prior_probs = [1 / (10 + 1)] * (10 + 1)
+    prob_model = depth_categorical_VI(prior_probs, cuda=None)
+    net = DUN_VI(model, prob_model, n_labelled, lr=0.001, momentum=0.9, cuda=None, schedule=None,
+                regression=True, pred_sig=None, weight_decay=0.0001)
+    
+    net.load(f'{basedir}/{run}/{acq_step}/models/theta_best.dat')
+
+    show_range = 5
+    ylim = 3
+    x_view = np.linspace(-show_range, show_range, 8000)
+    x_view = torch.Tensor(x_view).unsqueeze(1)
+
+    # Layerwise predictions mean and std dev
+    if inference != 'DUN':
+        pred_mu, pred_std = net.predict(x_view, Nsamples=50, return_model_std=True)
+    else:
+        pred_mu, pred_std = net.predict(x_view, get_std=True, return_model_std=True)
+    pred_mu = pred_mu.data.cpu().numpy()
+    pred_std = pred_std.data.cpu().numpy()
+    noise_std = net.f_neg_loglike.log_std.exp().data.cpu().numpy()
+
+    if query_strategy=='variance':
+        fig_handle = plt.figure(dpi=300)
+        fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+        ax1.scatter(X_train[unlabeled_idx], y_train[unlabeled_idx], s=3, alpha=0.2, c=c[0])
+        ax1.scatter(X_train[labeled_idx], y_train[labeled_idx], s=5, alpha=0.7, c='k')
+        ax1.plot(x_view, pred_mu, c=c[3])
+        ax1.fill_between(x_view[:,0], 
+                        pred_mu[:,0] + (pred_std[:,0]**2 + noise_std**2)**0.5, 
+                        pred_mu[:,0] - (pred_std[:,0]**2 + noise_std**2)**0.5, 
+                        alpha=0.2, color=c[3])
+        ax1.scatter(X_train[acquired_data_idx], y_train[acquired_data_idx], s=5, alpha=0.7, c=c[2])
+        ax1.set_title('Mean predictive function')
+        ax1.set_ylim([-ylim, ylim])
+        ax1.set_xlim([-show_range, show_range])
+        plt.tight_layout()
+
+        ax2.plot(x_view, pred_std, c='k', linewidth=1)
+        if clip_var:
+            pred_std = np.where(pred_std>1, 1, pred_std)
+            ax2.plot(x_view, pred_std, c='b', linestyle='--', linewidth=1.5)
+        plt.yscale('log')
+        ax2.set_title('Acquisition function')
+        ax2.set_xlim([-show_range, show_range])
+        plt.tight_layout()
+
+        fig.savefig(f'{media_dir}/mean_layerwise_TEST.pdf', format='pdf', bbox_inches='tight')
+        with open(f'{media_dir}/mean_layerwise_TEST.pickle', 'wb') as output_file:
+            pl.dump(fig_handle, output_file)
+        plt.close('all')
+
+    else:
+        fig_handle = plt.figure(dpi=300)
+        plt.scatter(X_train[unlabeled_idx], y_train[unlabeled_idx], s=3, alpha=0.2, c=c[0])
+        plt.scatter(X_train[labeled_idx], y_train[labeled_idx], s=5, alpha=0.7, c='k')
+        plt.plot(x_view, pred_mu, c=c[3])
+        plt.fill_between(x_view[:,0], 
+                        pred_mu[:,0] + (pred_std[:,0]**2 + noise_std**2)**0.5, 
+                        pred_mu[:,0] - (pred_std[:,0]**2 + noise_std**2)**0.5, 
+                        alpha=0.2, color=c[3])
+        plt.scatter(X_train[acquired_data_idx], y_train[acquired_data_idx], s=5, alpha=0.7, c=c[2])
+        plt.title('Mean predictive function')
+        plt.ylim([-ylim, ylim])
+        plt.xlim([-show_range, show_range])
+        plt.tight_layout()
+        plt.savefig(f'{media_dir}/mean_layerwise_TEST.pdf', format='pdf', bbox_inches='tight')
+        with open(f'{media_dir}/mean_layerwise_TEST.pickle', 'wb') as output_file:
+            pl.dump(fig_handle, output_file)
+        plt.close('all')
+
+
 if __name__=="__main__":
-    plot_bias_reduction_weights()
+    #plot_bias_reduction_weights()
+    #plot_rmse_errorbars()
+    plot_mean_layerwise()
