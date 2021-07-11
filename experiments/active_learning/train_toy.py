@@ -1,7 +1,6 @@
 import os
 import argparse
 from time import time
-import sys
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -11,6 +10,7 @@ import torch
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 from torch.functional import norm
+from src.utils import mkdir
 
 from src.utils import Datafeed, DatafeedIndexed, cprint, mkdir
 from src.datasets.additional_gap_loader import load_my_1d, load_agw_1d, load_andrew_1d
@@ -25,7 +25,7 @@ from src.baselines.mfvi import MFVI_regression_homo
 from src.baselines.training_wrappers import regression_baseline_net, regression_baseline_net_VI
 from src.baselines.train_fc import train_fc_baseline
 from src.acquisition_fns import acquire_samples
-from src.plots import plot_al_rmse, plot_mean_d_posterior
+from src.plots import plot_al_results, plot_mean_d_posterior
 
 matplotlib.use('Agg')
 
@@ -104,6 +104,7 @@ if cuda:
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
 print('cuda', cuda)
 
+mkdir(args.savedir)
 
 # Create datasets
 if args.dataset == 'my_1d':
@@ -157,7 +158,7 @@ for j in range(n_runs):
     mkdir(f'{args.savedir}/{name}/{j}')
 
     # Reset train data
-    trainset = DatafeedIndexed(torch.Tensor(X_train), torch.Tensor(y_train), args.init_train, seed=j, transform=None)
+    trainset = DatafeedIndexed(torch.Tensor(X_train), torch.Tensor(y_train), args.init_train, seed=seed, transform=None)
     n_labelled = int(sum(1 - trainset.unlabeled_mask))
 
     # Active learning loop
@@ -257,7 +258,7 @@ for j in range(n_runs):
         # Acquire data
         net.load(f'{basedir}/models/theta_best.dat')
         acquire_samples(net, trainset, args.query_size, query_strategy=args.query_strategy, 
-                        clip_var=args.clip_var, bias_reduction_weights=args.bias_weights)
+                        clip_var=args.clip_var, bias_reduction_weights=args.bias_weights, seed=seed)
         n_labelled = int(sum(1 - trainset.unlabeled_mask))
         current_labeled_idx = np.where(trainset.unlabeled_mask == 0)[0]
         acquired_data_idx = current_labeled_idx[~np.isin(current_labeled_idx, labeled_idx)] 
@@ -395,6 +396,8 @@ for j in range(n_runs):
     cprint('p', f'Val errors: {test_err[:,j]}\n')
     np.savetxt(f'{args.savedir}/{name}/{j}/train_err_{j}.csv', train_err[:,j], delimiter=',')
     np.savetxt(f'{args.savedir}/{name}/{j}/test_err_{j}.csv', test_err[:,j], delimiter=',')
+    np.savetxt(f'{args.savedir}/{name}/{j}/train_nll_{j}.csv', train_NLL[:,j], delimiter=',')
+    np.savetxt(f'{args.savedir}/{name}/{j}/test_nll_{j}.csv', test_NLL[:,j], delimiter=',')
 
     # plot validation error
     fig_handle = plt.figure(dpi=300)
@@ -408,22 +411,35 @@ for j in range(n_runs):
                 pl.dump(fig_handle, output_file)
     plt.close(plt.gcf())
 
+    # plot validation nll
+    fig_handle = plt.figure(dpi=300)
+    x = np.arange(args.init_train, args.init_train + args.n_queries*args.query_size, args.query_size)
+    plt.plot(x, test_NLL[:,j])
+    plt.xlabel('Train set size')
+    plt.ylabel('Validation NLL')
+    plt.tight_layout()
+    plt.savefig(f'{args.savedir}/{name}/{j}/val_nll.pdf', format='pdf', bbox_inches='tight')
+    with open(f'{args.savedir}/{name}/{j}/val_nll.pickle', 'wb') as output_file:
+                pl.dump(fig_handle, output_file)
+    plt.close(plt.gcf())
+
 # save and plot error
 means = test_err.mean(axis=1).reshape(-1,1)
 stds = test_err.std(axis = 1).reshape(-1,1)
 test_err = np.concatenate((means, stds, test_err), axis=1)
 np.savetxt(f'{args.savedir}/{name}/test_err.csv', test_err, delimiter=',')
-plot_al_rmse(f'{args.savedir}/{name}/rmse_plot', name, means.reshape(-1), stds.reshape(-1), args.n_queries, args.query_size, args.init_train)
+plot_al_results(f'{args.savedir}/{name}/rmse_plot', name, means.reshape(-1), stds.reshape(-1), args.n_queries, args.query_size, args.init_train, measure='rmse')
 means = train_err.mean(axis=1).reshape(-1,1)
 stds = train_err.std(axis = 1).reshape(-1,1)
 train_err = np.concatenate((means, stds, train_err), axis=1)
 np.savetxt(f'{args.savedir}/{name}/train_err.csv', train_err, delimiter=',')
 
-# save NLL
+# save and plot NLL
 means_NLL = test_NLL.mean(axis=1).reshape(-1,1)
 stds_NLL = test_NLL.std(axis=1).reshape(-1,1)
 test_NLL = np.concatenate((means_NLL, stds_NLL, test_NLL), axis=1)
 np.savetxt(f'{args.savedir}/{name}/test_NLL.csv', test_NLL, delimiter=',')
+plot_al_results(f'{args.savedir}/{name}/nll_plot', name, means_NLL.reshape(-1), stds_NLL.reshape(-1), args.n_queries, args.query_size, args.init_train, measure='nll')
 means_NLL = train_NLL.mean(axis=1).reshape(-1,1)
 stds_NLL = train_NLL.std(axis=1).reshape(-1,1)
 train_NLL = np.concatenate((means_NLL, stds_NLL, train_NLL), axis=1)
