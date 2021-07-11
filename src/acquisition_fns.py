@@ -10,7 +10,9 @@ from src.DUN.training_wrappers import DUN, DUN_VI
 
 
 def acquire_samples(model, dataset, query_size=10, query_strategy='random', batch_size=2048, 
-                    num_workers=4, clip_var=False, bias_reduction_weights=False):
+                    num_workers=4, clip_var=False, bias_reduction_weights=False, seed=0):
+    
+    torch.manual_seed(seed)
     
     unlabeled_idx = np.nonzero(dataset.unlabeled_mask)[0]
     
@@ -19,7 +21,7 @@ def acquire_samples(model, dataset, query_size=10, query_strategy='random', batc
                                              sampler=torch.utils.data.SubsetRandomSampler(unlabeled_idx))
        
     if query_strategy=='random':
-        sample_idx = random_query(poolloader, query_size, dataset.N)
+        sample_idx = random_query(poolloader, query_size, dataset.N, seed=seed)
         for sample in sample_idx:
             dataset.update_label(sample)
         return
@@ -35,12 +37,12 @@ def acquire_samples(model, dataset, query_size=10, query_strategy='random', batc
         dataset.update_label(sample, q_score)
 
 
-def random_query(dataloader, query_size, N):
+def random_query(dataloader, query_size, N, seed=0):
     """
     Randomly select samples from the pool for which to acquire labels.
     Since data is already shuffled in the DataLoader, simply select the first `query_size` samples.
     """
-    torch.manual_seed(0)
+    torch.manual_seed(seed)
     
     sample_idx = []
     for batch in dataloader:
