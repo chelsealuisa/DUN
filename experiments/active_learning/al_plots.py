@@ -1,5 +1,5 @@
 import numpy as np
-from src.plots import plot_al_mean_rmse, plot_al_rmse
+from src.plots import plot_al_mean_rmse, plot_al_results
 import matplotlib.pyplot as plt
 import os
 import fnmatch
@@ -37,7 +37,7 @@ def plot_rmse_mean_std_single_method():
             query_size = 5
         else:
             n_queries = 30
-        plot_al_rmse(f'{savedir}/{file}/rmse_plot', file, means, stds, n_queries, query_size, init_train_size, ylog=False)
+        plot_al_results(f'{savedir}/{file}/rmse_plot', file, means, stds, n_queries, query_size, init_train_size, ylog=False)
 
 
 def plot_mean_rmse_all_methods():
@@ -59,20 +59,20 @@ def plot_mean_rmse_all_methods():
 
 def plot_rmse_errorbars():
     # Compare RMSE with error bars
-    dataset = 'agw_1d'
-    savedir = 'saves'
-    n_queries = 30
-    init_train_size = 10
-    query_size = 10
+    dataset = 'wine'
+    savedir = 'saves_regression'
+    n_queries = 10
+    init_train_size = 20
+    query_size = 1
 
-    file_1 = f'DUN_{dataset}_10_100_0.001_0.0001_1_{init_train_size}_ntrain'
-    file_2 = f'DUN_{dataset}_10_100_0.001_0.0001_1_{init_train_size}_entropy_ntrain'
-    file_3 = f'DUN_{dataset}_10_100_0.001_0.0001_1_{init_train_size}_variance_clip_ntrain'
+    file_1 = f'DUN_{dataset}_5_10_0.001_0.0001_1_{init_train_size}_ntrain'
+    file_2 = f'DUN_{dataset}_5_10_0.001_0.0001_1_{init_train_size}_variance_ntrain'
+    file_3 = f'DUN_{dataset}_5_10_0.001_0.0001_1_{init_train_size}_variance_clip_ntrain'
     #file_4 = f'SGD_{dataset}_3_100_0.001_0.0001_1_{init_train_size}_ntrain'
-    results_1 = np.genfromtxt(f'{savedir}/{file_1}/results.csv', delimiter=',')
-    results_2 = np.genfromtxt(f'{savedir}/{file_2}/results.csv', delimiter=',')
-    results_3 = np.genfromtxt(f'{savedir}/{file_3}/results.csv', delimiter=',')
-    #results_4 = np.genfromtxt(f'{savedir}/{file_4}/results.csv', delimiter=',')
+    results_1 = np.genfromtxt(f'{savedir}/{file_1}/test_err.csv', delimiter=',')
+    results_2 = np.genfromtxt(f'{savedir}/{file_2}/test_err.csv', delimiter=',')
+    results_3 = np.genfromtxt(f'{savedir}/{file_3}/test_err.csv', delimiter=',')
+    #results_4 = np.genfromtxt(f'{savedir}/{file_4}/test_err.csv', delimiter=',')
     means_1 = results_1[:,0]
     stds_1 = results_1[:,1]
     means_2 = results_2[:,0]
@@ -86,9 +86,9 @@ def plot_rmse_errorbars():
     x = np.arange(init_train_size, init_train_size + n_queries*query_size, query_size)
     plt.plot(x, means_1, c='tab:blue', label='Random')
     plt.fill_between(x, means_1+stds_1, means_1-stds_1, alpha=0.3, color='tab:blue')
-    plt.plot(x, means_2, c='tab:red', label='Max entropy')
+    plt.plot(x, means_2, c='tab:red', label='Max variance')
     plt.fill_between(x, means_2+stds_2, means_2-stds_2, alpha=0.3, color='tab:red')
-    plt.plot(x, means_3, c='tab:green', label='Max variance')
+    plt.plot(x, means_3, c='tab:green', label='Max variance, clipped')
     plt.fill_between(x, means_3+stds_3, means_3-stds_3, alpha=0.3, color='tab:green')
     #plt.plot(x, means_4, c='tab:orange', label='SGD')
     #plt.fill_between(x, means_4+stds_4, means_4-stds_4, alpha=0.3, color='tab:orange')
@@ -96,13 +96,58 @@ def plot_rmse_errorbars():
     plt.ylabel('Validation RMSE')
     plt.title(f'{dataset} dataset')
     plt.legend()
-    plt.savefig( f'{savedir}/{dataset}_DUN_acq_fns.pdf', format='pdf', bbox_inches='tight')
+    plt.savefig( f'{savedir}/{dataset}_DUN_miguel.pdf', format='pdf', bbox_inches='tight')
+    plt.close()
+
+
+def plot_rmse_errorbars_80runs():
+    # Compare RMSE with error bars
+    dataset = 'wine'
+    savedir = 'saves_regression'
+    n_queries = 10
+    init_train_size = 20
+    query_size = 1
+
+    file_1 = f'DUN_{dataset}_5_10_0.001_0.0001_1_{init_train_size}_ntrain'
+    file_2 = f'DUN_{dataset}_5_10_0.001_0.0001_1_{init_train_size}_variance_ntrain'
+    file_3 = f'DUN_{dataset}_5_10_0.001_0.0001_1_{init_train_size}_variance_clip_ntrain'
+    results_1a = np.genfromtxt(f'{savedir}/{file_1}/test_err_0-39.csv', delimiter=',')[:,2:]
+    results_1b = np.genfromtxt(f'{savedir}/{file_1}/test_err_40-79.csv', delimiter=',')[:,2:]
+    results_2a = np.genfromtxt(f'{savedir}/{file_2}/test_err_0-39.csv', delimiter=',')[:,2:]
+    results_2b = np.genfromtxt(f'{savedir}/{file_2}/test_err_40-79.csv', delimiter=',')[:,2:]
+    results_3a = np.genfromtxt(f'{savedir}/{file_3}/test_err_0-39.csv', delimiter=',')[:,2:]
+    results_3b = np.genfromtxt(f'{savedir}/{file_3}/test_err_40-79.csv', delimiter=',')[:,2:]
+    
+    results_1 = np.concatenate([results_1a, results_1b], axis=1)
+    results_2 = np.concatenate([results_2a, results_2b], axis=1)
+    results_3 = np.concatenate([results_3a, results_3b], axis=1)
+
+    means_1 = np.mean(results_1, axis=1)
+    stds_1 = np.std(results_1, axis=1)
+    means_2 = np.mean(results_2, axis=1)
+    stds_2 = np.std(results_2, axis=1)
+    means_3 = np.mean(results_3, axis=1)
+    stds_3 = np.std(results_3, axis=1)
+
+    plt.figure(dpi=300)
+    x = np.arange(init_train_size, init_train_size + n_queries*query_size, query_size)
+    plt.plot(x, means_1, c='tab:blue', label='Random')
+    plt.fill_between(x, means_1+stds_1, means_1-stds_1, alpha=0.3, color='tab:blue')
+    plt.plot(x, means_2, c='tab:red', label='Max variance')
+    plt.fill_between(x, means_2+stds_2, means_2-stds_2, alpha=0.3, color='tab:red')
+    plt.plot(x, means_3, c='tab:green', label='Max variance, clipped')
+    plt.fill_between(x, means_3+stds_3, means_3-stds_3, alpha=0.3, color='tab:green')
+    plt.xlabel('Train set size')
+    plt.ylabel('Validation RMSE')
+    plt.title(f'{dataset} dataset')
+    plt.legend()
+    plt.savefig( f'{savedir}/{dataset}_DUN_miguel_80runs.pdf', format='pdf', bbox_inches='tight')
     plt.close()
 
 
 def plot_sidebyside_posterior_barplots():
     # Side-by-side posterior bar plots
-    dir = './saves_regression/DUN_concrete_10_100_0.001_0.0001_1_50_variance_clip_ntrain'
+    dir = './saves_regression/DUN_naval_10_100_0.001_0.0001_1_50_variance_clip_ntrain'
     small = 50
     large = 630
     n_runs = 5
@@ -135,7 +180,7 @@ def plot_sidebyside_posterior_barplots():
     ax2 = ax.bar(x + width/2, means_large, width, yerr=stds_large, label=f'Train size: {large}')
     plt.title(f'Approx posterior distribution over depth')
     plt.xlabel('Layer')
-    plt.legend(loc='lower right')
+    plt.legend(loc='upper left')
     plt.savefig(f'{dir}/posterior_plots/{small}_{large}_d_post_approx.pdf', format='pdf', bbox_inches='tight')
     with open(f'{dir}/posterior_plots/{small}_{large}_depth_post_approx.pickle', 'wb') as output_file:
         pl.dump(fig, output_file)
@@ -291,5 +336,6 @@ def plot_mean_layerwise():
 
 if __name__=="__main__":
     #plot_bias_reduction_weights()
-    #plot_rmse_errorbars()
-    plot_mean_layerwise()
+    plot_rmse_errorbars_80runs()
+    #plot_mean_layerwise()
+    #plot_sidebyside_posterior_barplots()
