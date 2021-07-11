@@ -275,7 +275,7 @@ save_models
 saves_regression
 saves_classification
 saves_images
-data/MNIST
+experiments/data/MNIST
 *.pth.tar
 
 # slurm
