@@ -376,16 +376,16 @@ def plot_calibration_curve(savefile, net, X_test, y_test, n_bins=10, dpi=200, sh
         plt.close(fig=None)
 
 
-def plot_al_rmse(savefile, title, means, stds, n_queries, query_size, init_train_size=10, dpi=300, show=False, ylog=False, accuracy=False):
+def plot_al_results(savefile, title, means, stds, n_queries, query_size, init_train_size=10, dpi=300, show=False, ylog=False, measure='rmse'):
 
     plt.figure(dpi=dpi)
     x = np.arange(init_train_size, init_train_size + n_queries*query_size, query_size)
     
-    if accuracy:
+    if measure=='accuracy':
         plt.plot(x, 1 - means)
         plt.fill_between(x, (1-means)+stds, (1-means)-stds, alpha=0.3)
         plt.ylabel('Mean validation accuracy')
-    else:
+    elif measure=='rmse':
         plt.plot(x, means)
         plt.fill_between(x, means+stds, means-stds, alpha=0.3)
         if ylog:
@@ -393,6 +393,10 @@ def plot_al_rmse(savefile, title, means, stds, n_queries, query_size, init_train
             plt.ylabel('Mean validation RMSE (log)')
         else:
             plt.ylabel('Mean validation RMSE')
+    elif measure=='nll':
+        plt.plot(x, means)
+        plt.fill_between(x, means+stds, means-stds, alpha=0.3)
+        plt.ylabel('Mean validation NLL')
     plt.xlabel('Train set size')
     plt.title(title)
 
