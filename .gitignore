@@ -274,6 +274,7 @@ checkpoints
 save_models
 saves_regression
 saves_classification
+saves_images
 *.pth.tar
 
 # slurm
