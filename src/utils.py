@@ -191,6 +191,8 @@ class DatafeedImage(data.Dataset):
 
     def __getitem__(self, index):
         img = self.x_train[index]
+        if isinstance(img, torch.Tensor):
+            img = np.array(img)
         img = Image.fromarray(img)
         if self.transform is not None:
             img = self.transform(img)
@@ -268,6 +270,25 @@ class DatafeedIndexed(data.Dataset):
         for i in idx:
             weights.append(1 + (self.N - self.M)/(self.N - self.m[i]) * (1/((self.N - self.m[i] + 1)*self.q_scores[i]) - 1))
         return torch.Tensor(weights)
+
+
+class DatafeedImageIndexed(DatafeedIndexed):
+
+    def __init__(self, x_train, y_train, train_size, seed, transform):
+        super().__init__(x_train, y_train, train_size, seed=seed, transform=transform)
+
+    def __getitem__(self, index):
+        
+        img = self.data[index]
+        if isinstance(img, torch.Tensor):
+            img = np.array(img)
+        img = Image.fromarray(img)
+        if self.transform is not None:
+            img = self.transform(img)
+        if self.targets is not None:
+            return img, self.targets[index], index
+        else:
+            return img
 
 
 def torch_onehot(y, Nclass):
