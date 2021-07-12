@@ -1,6 +1,7 @@
 import os
 import argparse
 from time import time
+import sys
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -68,7 +69,7 @@ parser.add_argument('--query_size', type=int,
                     default=10)
 parser.add_argument('--query_strategy', choices=['random','entropy', 'variance'], 
                     help='type of acquisition function (default: random)', default='random')
-parser.add_argument('--clip_var', type=bool, 
+parser.add_argument('--clip_var', action='store_true',
                     help='clip variance at 1 for variance acquisition (default: False)', default=False)
 parser.add_argument('--init_train', type=int, 
                     help='number of labelled observations in initial train set (default: 10)',
