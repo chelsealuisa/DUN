@@ -71,6 +71,10 @@ parser.add_argument('--query_strategy', choices=['random','entropy', 'variance']
                     help='type of acquisition function (default: random)', default='random')
 parser.add_argument('--clip_var', action='store_true',
                     help='clip variance at 1 for variance acquisition (default: False)', default=False)
+parser.add_argument('--sampling', action='store_true',
+                    help='stochastic relaxation of acquisition function (default: False)', default=False)
+parser.add_argument('--T', type=int, 
+                    help='temperature for sampling acquisition (default: 1)', default=1)
 parser.add_argument('--init_train', type=int, 
                     help='number of labelled observations in initial train set (default: 10)',
                     default=10)
@@ -83,6 +87,8 @@ parser.add_argument('--bias_weights', type=bool,
 
 args = parser.parse_args()
 
+if args.bias_weights:
+    args.sampling = True
 
 # Some defaults
 batch_size = args.batch_size
@@ -100,6 +106,8 @@ if args.query_strategy != 'random':
     name += f'_{args.query_strategy}'
 if args.clip_var:
     name += '_clip'
+if args.sampling:
+    name += f'_{args.T}T'
 if args.bias_weights:
     name += '_biasw'
 name += '_ntrain'
@@ -254,7 +262,7 @@ for j in range(n_runs):
         # Acquire data
         net.load(f'{basedir}/models/theta_best.dat')
         acquire_samples(net, trainset, args.query_size, query_strategy=args.query_strategy, 
-                        clip_var=args.clip_var, bias_reduction_weights=args.bias_weights, seed=seed)
+                        clip_var=args.clip_var, sampling=args.sampling, T=args.T, seed=seed)
         n_labelled = int(sum(1 - trainset.unlabeled_mask))
         current_labeled_idx = np.where(trainset.unlabeled_mask == 0)[0]
         acquired_data_idx = current_labeled_idx[~np.isin(current_labeled_idx, labeled_idx)] 
