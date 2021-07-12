@@ -2,6 +2,7 @@ import numpy as np
 from numpy.lib.arraysetops import isin
 from scipy.special import softmax
 import random
+import sys
 import torch
 from torch.nn import functional as F
 from scipy import stats
@@ -55,7 +56,7 @@ def random_query(dataloader, query_size, N, seed=0):
     return sample_idx[0:query_size]
 
 
-def max_entropy_query(dataloader, net, query_size=10, n_samples=1000, n_bins=10, bias_weights=False):
+def max_entropy_query(dataloader, net, query_size=10, n_samples=1000, n_bins=10, bias_weights=False, T=1):
     '''Query points with max entropy. For regression, entropy approximated via histogram of sampled predictions.'''    
     entropies = []
     indices = []
@@ -103,6 +104,7 @@ def max_entropy_query(dataloader, net, query_size=10, n_samples=1000, n_bins=10,
     ent = np.asarray(entropies)
     ind = np.asarray(indices)
     sorted_pool = np.argsort(ent)[::-1]
+    ent = T*ent # tempering
     softmax_scores = softmax(ent)
 
     if bias_weights:
@@ -122,7 +124,7 @@ def max_entropy_query(dataloader, net, query_size=10, n_samples=1000, n_bins=10,
         return ind[sorted_pool][0:query_size], softmax_scores[sorted_pool][0:query_size]
 
 
-def max_pred_var_query(dataloader, net, query_size=10, clip_var=False, n_samples=50, bias_weights=False):
+def max_pred_var_query(dataloader, net, query_size=10, clip_var=False, n_samples=50, bias_weights=False, T=1):
     '''
     Query points with max model predictive variance (return_model_std=True).
     Equivalent to BALD acquisition.
@@ -183,6 +185,7 @@ def max_pred_var_query(dataloader, net, query_size=10, clip_var=False, n_samples
         pred_stds = np.where(pred_stds>1, 1, pred_stds)
     ind = np.asarray(indices)
     sorted_pool = np.argsort(pred_stds)[::-1]
+    pred_stds = T*pred_stds # tempering
     softmax_scores = softmax(pred_stds)
 
     if bias_weights:
