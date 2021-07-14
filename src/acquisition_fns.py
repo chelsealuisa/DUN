@@ -11,7 +11,7 @@ from src.DUN.training_wrappers import DUN, DUN_VI
 
 
 def acquire_samples(model, dataset, query_size=10, query_strategy='random', batch_size=2048, 
-                    num_workers=4, clip_var=False, bias_reduction_weights=False, seed=0):
+                    num_workers=4, clip_var=False, sampling=False, T=1, seed=0):
     
     torch.manual_seed(seed)
     
@@ -27,9 +27,9 @@ def acquire_samples(model, dataset, query_size=10, query_strategy='random', batc
             dataset.update_label(sample)
         return
     elif query_strategy=='entropy':
-        sample_idx, q_scores = max_entropy_query(poolloader, model, query_size, bias_weights=bias_reduction_weights)
+        sample_idx, q_scores = max_entropy_query(poolloader, model, query_size, sampling=sampling, T=T, seed=seed)
     elif query_strategy=='variance':
-        sample_idx, q_scores = max_pred_var_query(poolloader, model, query_size, clip_var, bias_weights=bias_reduction_weights)
+        sample_idx, q_scores = max_pred_var_query(poolloader, model, query_size, clip_var, sampling=sampling, T=T, seed=seed)
     else:
         raise Exception(f'{query_strategy} acquisition function not supported.')
     
@@ -56,8 +56,11 @@ def random_query(dataloader, query_size, N, seed=0):
     return sample_idx[0:query_size]
 
 
-def max_entropy_query(dataloader, net, query_size=10, n_samples=1000, n_bins=10, bias_weights=False, T=1):
+def max_entropy_query(dataloader, net, query_size=10, n_samples=1000, n_bins=10, sampling=False, T=1, seed=0):
     '''Query points with max entropy. For regression, entropy approximated via histogram of sampled predictions.'''    
+    torch.manual_seed(seed)
+    random.seed(seed)    
+    
     entropies = []
     indices = []
     
@@ -104,31 +107,38 @@ def max_entropy_query(dataloader, net, query_size=10, n_samples=1000, n_bins=10,
     ent = np.asarray(entropies)
     ind = np.asarray(indices)
     sorted_pool = np.argsort(ent)[::-1]
-    ent = T*ent # tempering
-    softmax_scores = softmax(ent)
+    ent = T*ent if sampling else ent # tempering
+    softmax_scores = softmax(ent) if len(ent)>1 else 1
 
-    if bias_weights:
+    if sampling:
         indices = []
         q_scores = []
-        for i in range(query_size):
+        for _ in range(min(query_size, len(ent))):
             # sample a point with probability = softmax score
-            choice = random.choices(ind, weights=softmax_scores, k=1)[0]
-            q_scores.append(softmax_scores[np.where(ind==choice)][0])
+            if len(ind)==1:
+                choice = ind
+                q_scores.append(1)
+            else:
+                choice = random.choices(ind, weights=softmax_scores, k=1)[0]
+                q_scores.append(softmax_scores[np.where(ind==choice)][0])
             # remove is from the pool and recompute softmaxes
             indices.append(choice)
             ent = np.delete(ent, np.where(ind==choice))
             ind = np.delete(ind, np.where(ind==choice))
-            softmax_scores = softmax(ent)
+            softmax_scores = softmax(ent) if len(ent)>1 else 1
         return indices, q_scores
     else:
         return ind[sorted_pool][0:query_size], softmax_scores[sorted_pool][0:query_size]
 
 
-def max_pred_var_query(dataloader, net, query_size=10, clip_var=False, n_samples=50, bias_weights=False, T=1):
+def max_pred_var_query(dataloader, net, query_size=10, clip_var=False, n_samples=50, sampling=False, T=1, seed=0):
     '''
     Query points with max model predictive variance (return_model_std=True).
     Equivalent to BALD acquisition.
     '''    
+    torch.manual_seed(seed)
+    random.seed(seed)
+
     stds = []
     indices = []
     
@@ -185,21 +195,25 @@ def max_pred_var_query(dataloader, net, query_size=10, clip_var=False, n_samples
         pred_stds = np.where(pred_stds>1, 1, pred_stds)
     ind = np.asarray(indices)
     sorted_pool = np.argsort(pred_stds)[::-1]
-    pred_stds = T*pred_stds # tempering
-    softmax_scores = softmax(pred_stds)
+    pred_stds = T*pred_stds if sampling else pred_stds # tempering
+    softmax_scores = softmax(pred_stds) if len(pred_stds)>1 else 1
 
-    if bias_weights:
+    if sampling:
         indices = []
         q_scores = []
-        for i in range(query_size):
+        for i in range(min(query_size, len(pred_stds))):
             # sample a point with probability = softmax score
-            choice = random.choices(ind, weights=softmax_scores, k=1)[0]
-            q_scores.append(softmax_scores[np.where(ind==choice)][0])
-            # remove is from the pool and recompute softmaxes
+            if len(ind)==1:
+                choice = ind
+                q_scores.append(1)
+            else:
+                choice = random.choices(ind, weights=softmax_scores, k=1)[0]
+                q_scores.append(softmax_scores[np.where(ind==choice)][0])
+            # remove id from the pool and recompute softmaxes
             indices.append(choice)
             pred_stds = np.delete(pred_stds, np.where(ind==choice))
             ind = np.delete(ind, np.where(ind==choice))
-            softmax_scores = softmax(pred_stds)
+            softmax_scores = softmax(pred_stds) if len(pred_stds)>1 else 1
         return indices, q_scores
     else:
         return ind[sorted_pool][0:query_size], softmax_scores[sorted_pool][0:query_size]
