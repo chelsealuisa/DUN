@@ -247,7 +247,7 @@ for j in range(n_runs):
             prior_probs = [1 / (n_layers)] * (n_layers)
             prob_model = depth_categorical_VI(prior_probs, cuda=cuda)
             net = DUN_VI(model, prob_model, n_labelled, lr=lr, momentum=momentum, cuda=cuda, schedule=milestones,
-                        regression=False, pred_sig=None, weight_decay=wd)
+                        seed=seed, regression=False, pred_sig=None, weight_decay=wd)
         
         # Train model on labeled data
         labeled_idx = np.where(trainset.unlabeled_mask == 0)[0]

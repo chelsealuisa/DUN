@@ -1,3 +1,5 @@
+import numpy as np
+import random
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9,7 +11,7 @@ from src.probability import homo_Gauss_mloglike, depth_categorical
 
 
 class DUN(BaseNet):
-    def __init__(self, model, prob_model, N_train, lr=1e-2, momentum=0.5, weight_decay=0,
+    def __init__(self, model, prob_model, N_train, lr=1e-2, momentum=0.5, weight_decay=0, seed=None,
                  cuda=True, schedule=None, regression=False, pred_sig=None):
         super(DUN, self).__init__()
 
@@ -20,6 +22,7 @@ class DUN(BaseNet):
         self.model = model
         self.prob_model = prob_model
         self.cuda = cuda
+        self.seed = seed
         self.regression = regression
         self.pred_sig = pred_sig
         if self.regression:
@@ -38,6 +41,12 @@ class DUN(BaseNet):
         self.epoch = 0
 
     def create_net(self):
+        if self.seed is not None:
+            random.seed(self.seed)
+            np.random.seed(self.seed)
+            torch.manual_seed(self.seed)
+            if self.cuda:
+                torch.cuda.manual_seed(self.seed)        
         if self.cuda:
             self.model.cuda()
             self.f_neg_loglike.cuda()
@@ -211,10 +220,11 @@ class DUN(BaseNet):
 
 
 class DUN_VI(DUN):
-    def __init__(self, model, prob_model, N_train, lr=1e-2, momentum=0.5, weight_decay=0, cuda=True,
+    def __init__(self, model, prob_model, N_train, lr=1e-2, momentum=0.5, weight_decay=0, cuda=True, seed=None,
                  schedule=None, regression=False, pred_sig=None):
-        super(DUN_VI, self).__init__(model, prob_model, N_train, lr, momentum, weight_decay, cuda,
-                                     schedule, regression, pred_sig)
+        super(DUN_VI, self).__init__(model=model, prob_model=prob_model, N_train=N_train, lr=lr, momentum=momentum, 
+                                     weight_decay=weight_decay, cuda=cuda, seed=seed, schedule=schedule, 
+                                     regression=regression, pred_sig=pred_sig)
 
     def fit(self, x, y):
         """Optimise stochastically estimated marginal joint of parameters and weights"""
