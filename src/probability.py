@@ -170,7 +170,7 @@ class depth_categorical(nn.Module):
         act_vec_flat = act_vec.view(depth*batch_size, -1)  # flattening results in batch_n changing first
         loglike_per_act = -f_neg_loglike(act_vec_flat, y_expand).view(depth, batch_size)
         
-        if (idx is not None and dataset is not None):
+        if (idx is not None and dataset is not None): # loss with bias weights
             weights = dataset.get_rlure_weights(idx)
             weights = weights.repeat(depth, 1)
             loglike_per_act = loglike_per_act * weights # multiply each column of ll_per_act with weights vector
