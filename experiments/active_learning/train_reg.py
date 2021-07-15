@@ -119,38 +119,6 @@ print('cuda', cuda)
 
 mkdir(args.savedir)
 
-# Create datasets
-if args.dataset == "flights":
-    X_train, X_test, _, _, y_train, y_test, y_means, y_stds = load_flight(base_dir=args.datadir,
-                                                                            k800=(args.split == "800k"))
-elif args.dataset in uci_names + uci_gap_names:
-    gap = False
-    if args.dataset in uci_gap_names:
-        gap = True
-        args.dataset = args.dataset[:-4]
-
-    X_train, X_test, _, _, y_train, y_test, y_means, y_stds = \
-        load_gap_UCI(base_dir=args.datadir, dname=args.dataset, n_split=int(args.split), gap=gap)
-
-testset = Datafeed(torch.Tensor(X_test), torch.Tensor(y_test), transform=None)
-
-input_dim = X_train.shape[1]
-output_dim = y_train.shape[1]
-
-print(X_train.shape, y_train.shape, X_test.shape, y_test.shape)
-
-valloader = torch.utils.data.DataLoader(testset, batch_size, shuffle=False, pin_memory=True,
-                                        num_workers=args.num_workers)
-#testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False, pin_memory=True,
-#                                        num_workers=args.num_workers)
-
-# Save data for plots
-mkdir(f'{args.savedir}/{name}/')
-np.savetxt(f'{args.savedir}/{name}/X_train.csv', X_train, delimiter=',')
-np.savetxt(f'{args.savedir}/{name}/y_train.csv', y_train, delimiter=',')
-np.savetxt(f'{args.savedir}/{name}/X_val.csv', X_test, delimiter=',')
-np.savetxt(f'{args.savedir}/{name}/y_val.csv', y_test, delimiter=',')
-
 # Experiment runs
 n_runs = args.n_runs
 train_err = np.zeros((args.n_queries, n_runs))
@@ -163,7 +131,35 @@ for j in range(n_runs):
     seed = j
     mkdir(f'{args.savedir}/{name}/{j}')
 
-    # Reset train data
+    # Create datasets
+    if args.split==0:
+        n_split = j%5 if args.dataset=='protein' else j%20
+    else:
+        n_split = args.split
+    if args.dataset == "flights":
+        X_train, X_test, _, _, y_train, y_test, y_means, y_stds = load_flight(base_dir=args.datadir,
+                                                                                k800=(args.split == "800k"))
+    elif args.dataset in uci_names + uci_gap_names:
+        gap = False
+        if args.dataset in uci_gap_names:
+            gap = True
+            args.dataset = args.dataset[:-4]
+
+        X_train, X_test, _, _, y_train, y_test, y_means, y_stds = \
+            load_gap_UCI(base_dir=args.datadir, dname=args.dataset, n_split=int(n_split), gap=gap)
+
+    testset = Datafeed(torch.Tensor(X_test), torch.Tensor(y_test), transform=None)
+
+    input_dim = X_train.shape[1]
+    output_dim = y_train.shape[1]
+
+    print(X_train.shape, y_train.shape, X_test.shape, y_test.shape)
+
+    valloader = torch.utils.data.DataLoader(testset, batch_size, shuffle=False, pin_memory=False,
+                                            num_workers=args.num_workers)
+    #testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False, pin_memory=True,
+    #                                        num_workers=args.num_workers)
+
     trainset = DatafeedIndexed(torch.Tensor(X_train), torch.Tensor(y_train), args.init_train, seed=seed, transform=None)
     n_labelled = int(sum(1 - trainset.unlabeled_mask))
 
