@@ -114,45 +114,6 @@ print('cuda', cuda)
 
 mkdir(args.savedir)
 
-# Create datasets
-if args.dataset == 'my_1d':
-    X_train, y_train, X_test, y_test = load_my_1d(args.datadir)
-elif args.dataset == 'matern_1d':
-    X_train, y_train = load_matern_1d(args.datadir)
-elif args.dataset == 'agw_1d':
-    X_train, y_train = load_agw_1d(args.datadir, get_feats=False)
-elif args.dataset == 'andrew_1d':
-    X_train, y_train = load_andrew_1d(args.datadir)
-elif args.dataset == 'axis':
-    X_train, y_train = load_axis(args.datadir)
-elif args.dataset == 'origin':
-    X_train, y_train = load_origin(args.datadir)
-elif args.dataset == 'wiggle':
-    X_train, y_train = load_wiggle()
-
-X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.20, random_state=42, shuffle=True)
-X_val, X_test, y_val, y_test = train_test_split(X_val, y_val, test_size=0.50, random_state=42, shuffle=True)
-
-valset = Datafeed(torch.Tensor(X_val), torch.Tensor(y_val), transform=None)
-testset = Datafeed(torch.Tensor(X_test), torch.Tensor(y_test), transform=None)
-
-input_dim = X_train.shape[1]
-output_dim = y_train.shape[1]
-
-print(X_train.shape, y_train.shape, X_val.shape, y_val.shape, X_test.shape, y_test.shape)
-
-valloader = torch.utils.data.DataLoader(valset, batch_size=batch_size, shuffle=False, pin_memory=True,
-                                        num_workers=args.num_workers)
-testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False, pin_memory=True,
-                                        num_workers=args.num_workers)
-
-# Save data for plots
-mkdir(f'{args.savedir}/{name}/')
-np.savetxt(f'{args.savedir}/{name}/X_train.csv', X_train, delimiter=',')
-np.savetxt(f'{args.savedir}/{name}/y_train.csv', y_train, delimiter=',')
-np.savetxt(f'{args.savedir}/{name}/X_val.csv', X_val, delimiter=',')
-np.savetxt(f'{args.savedir}/{name}/y_val.csv', y_val, delimiter=',')
-
 # Experiment runs
 n_runs = args.n_runs
 train_err = np.zeros((args.n_queries, n_runs))
@@ -164,6 +125,38 @@ mll = np.zeros((args.n_queries, n_runs))
 for j in range(n_runs):
     seed = j
     mkdir(f'{args.savedir}/{name}/{j}')
+
+    # Create datasets
+    if args.dataset == 'my_1d':
+        X_train, y_train, X_test, y_test = load_my_1d(args.datadir)
+    elif args.dataset == 'matern_1d':
+        X_train, y_train = load_matern_1d(args.datadir)
+    elif args.dataset == 'agw_1d':
+        X_train, y_train = load_agw_1d(args.datadir, get_feats=False)
+    elif args.dataset == 'andrew_1d':
+        X_train, y_train = load_andrew_1d(args.datadir)
+    elif args.dataset == 'axis':
+        X_train, y_train = load_axis(args.datadir)
+    elif args.dataset == 'origin':
+        X_train, y_train = load_origin(args.datadir)
+    elif args.dataset == 'wiggle':
+        X_train, y_train = load_wiggle()
+
+    X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.20, random_state=seed, shuffle=True)
+    X_val, X_test, y_val, y_test = train_test_split(X_val, y_val, test_size=0.50, random_state=seed, shuffle=True)
+
+    valset = Datafeed(torch.Tensor(X_val), torch.Tensor(y_val), transform=None)
+    testset = Datafeed(torch.Tensor(X_test), torch.Tensor(y_test), transform=None)
+
+    input_dim = X_train.shape[1]
+    output_dim = y_train.shape[1]
+
+    print(X_train.shape, y_train.shape, X_val.shape, y_val.shape, X_test.shape, y_test.shape)
+
+    valloader = torch.utils.data.DataLoader(valset, batch_size=batch_size, shuffle=False, pin_memory=True,
+                                            num_workers=args.num_workers)
+    testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False, pin_memory=True,
+                                            num_workers=args.num_workers)
 
     # Reset train data
     trainset = DatafeedIndexed(torch.Tensor(X_train), torch.Tensor(y_train), args.init_train, seed=seed, transform=None)
