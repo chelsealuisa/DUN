@@ -282,3 +282,4 @@ experiments/data/MNIST
 *.err
 *.out
 *_jobs*.txt
+*.tar.gz
