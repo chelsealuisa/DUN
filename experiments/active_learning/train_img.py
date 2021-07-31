@@ -17,7 +17,7 @@ from src.utils import DatafeedImage, DatafeedImageIndexed, cprint, mkdir
 from src.probability import depth_categorical_VI
 from src.DUN.train_fc import train_fc_DUN
 from src.DUN.training_wrappers import DUN_VI
-from src.DUN.stochastic_img_resnets import resnet18, resnet34, resnet50, resnet101
+from src.DUN.stochastic_img_resnets import resnet18, resnet34, resnet50, resnet101, arq_uncert_conv2d_resnet
 from src.baselines.SGD import SGD_regression_homo
 from src.baselines.dropout import dropout_regression_homo
 from src.baselines.mfvi import MFVI_regression_homo
@@ -37,7 +37,7 @@ parser.add_argument('--n_epochs', default=None, type=int,
 parser.add_argument('--dataset', help='which dataset to train on (default: MNIST)', default='MNIST',
                     choices=['MNIST'])
 parser.add_argument('--model', type=str, default='resnet50',
-                    choices=["resnet18", "resnet32", "resnet50", "resnet101"],
+                    choices=["arq_uncert_conv2d_resnet", "resnet18", "resnet32", "resnet50", "resnet101"],
                     help='model to train (default: resnet50)')
 parser.add_argument('--start_depth', default=1, type=int,
                     help='first layer to be uncertain about (default: 1)')
@@ -145,6 +145,8 @@ elif model == 'resnet50':
     model_class = resnet50
 elif model == 'resnet101':
     model_class = resnet101
+elif model == 'arq_uncert_conv2d_resnet':
+    model_class = arq_uncert_conv2d_resnet
 else:
     raise Exception('requested model not implemented')
 
@@ -240,9 +242,13 @@ for j in range(n_runs):
                                         MC_samples=0, weight_decay=wd, regression=False)
         elif args.inference == 'DUN':
 
-            model = model_class(arch_uncert=True, start_depth=start_depth, end_depth=end_depth, num_classes=num_classes,
-                        zero_init_residual=True, initial_conv=initial_conv, concat_pool=False,
-                        input_chanels=input_chanels, p_drop=0)
+            if model_class==arq_uncert_conv2d_resnet:
+                model = model_class(input_chan=input_chanels, output_dim=num_classes, outer_width=64, 
+                            inner_width=32, n_layers=n_layers)
+            else:
+                model = model_class(arch_uncert=True, start_depth=start_depth, end_depth=end_depth, num_classes=num_classes,
+                            zero_init_residual=True, initial_conv=initial_conv, concat_pool=False,
+                            input_chanels=input_chanels, p_drop=0)
 
             prior_probs = [1 / (n_layers)] * (n_layers)
             prob_model = depth_categorical_VI(prior_probs, cuda=cuda)
