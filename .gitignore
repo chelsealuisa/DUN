@@ -281,3 +281,4 @@ experiments/data/MNIST
 # slurm
 *.err
 *.out
+*_jobs*.txt
