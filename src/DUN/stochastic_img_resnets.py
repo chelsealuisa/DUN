@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.modules.dropout import _DropoutNd
+from src.utils import cprint
+from src.DUN.layers import global_mean_pool_2d, bern_bottleneck_convBlock, res_MLPBlock
 
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101']
 
@@ -357,3 +359,53 @@ def resnet101(**kwargs):
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_
     """
     return _resnet(Bottleneck, [3, 4, 23, 3], **kwargs)
+
+
+class arq_uncert_conv2d_resnet(nn.Module):
+    """Class for convolutional variational architecture resnet with new more modular structure"""
+    def __init__(self, input_chan, output_dim, outer_width, inner_width, n_layers):
+        super(arq_uncert_conv2d_resnet, self).__init__()
+
+        self.input_chan = input_chan
+        self.output_dim = output_dim
+        self.outer_width = outer_width
+        self.inner_width = inner_width
+        self.input_layer = nn.Sequential(nn.Conv2d(self.input_chan, outer_width, 5), nn.AvgPool2d(kernel_size=(2,2)))
+        self.output_layer = nn.Sequential(global_mean_pool_2d(), res_MLPBlock(outer_width), nn.Linear(outer_width, self.output_dim))
+        self.n_downsample_layer = nn.AvgPool2d(kernel_size=(2,2))
+        self.n_layers = n_layers
+
+        stochstic_layers = []
+        for i in range(self.n_layers):
+            stochstic_layers.append(bern_bottleneck_convBlock(inner_width, outer_width))
+        self.stochstic_layers = nn.Sequential(*stochstic_layers)
+        cprint('p', f'# stochastic layers: {len(self.stochstic_layers)}')
+
+    def forward(self, x, depth=None):
+        return self.forward_get_acts(x, depth=depth)
+
+    def vec_forward(self, x, vec):
+        assert vec.shape[0] == self.n_layers
+
+        x = self.input_layer(x)
+        for i in range(self.n_layers):
+            x = self.stochstic_layers[i](x, vec[i])
+        x = self.output_layer(x)
+        return x
+
+    def forward_get_acts(self, x, depth=None):
+        act_vec = []
+        x = self.input_layer(x)
+        act_vec.append(self.output_layer(x).unsqueeze(0))
+
+        n_layers = depth if depth is not None else self.n_layers
+
+        for i in range(n_layers):
+            x = self.stochstic_layers[i](x, 1)
+            act_vec.append(self.output_layer(x).unsqueeze(0))
+        act_vec = torch.cat(act_vec, dim=0)
+        return act_vec
+
+    def get_w_prior_loglike(self, k=0):
+        cprint('y', f'w prior ll: {self.stochstic_layers[0].block[2].weight.data.new_zeros(self.n_layers+1).shape}')
+        return self.stochstic_layers[0].block[2].weight.data.new_zeros(self.n_layers+1)
